@@ -4,14 +4,13 @@
  * desc: 进程池
  */
 
-#ifndef _PROCESS_POOL_H_
-#define _PROCESS_POOL_H_
+#ifndef _CPUNODE_PROCESS_POOL_H_
+#define _CPUNODE_PROCESS_POOL_H_
 
 #include <sys/types.h>
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 typedef struct process {
