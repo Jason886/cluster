@@ -3,7 +3,7 @@
 struct config *g_conf = NULL;
 wtk_vipkid_engine_cfg_t *g_vipkid_engine_cfg = NULL;
 struct event_base *g_base = NULL;
-process_pool_t g_worker_pool = {0};
+cpunode_httpd_t g_httpd = {0};
 int g_port = 9001;
 
 static void init_logger_with_daemon(char *level, int is_daemon) {

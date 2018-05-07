@@ -12,7 +12,7 @@
 #include "libmacro.h"
 
 #include "wtk_vipkid_engine.h"
-#include "process_pool.h"
+#include "httpd.h"
 
 #include <event2/event.h>
 #include <event2/http.h>
@@ -24,7 +24,7 @@ extern "C" {
 extern struct config *g_conf;
 extern wtk_vipkid_engine_cfg_t *g_vipkid_engine_cfg;
 extern struct event_base *g_base;
-extern process_pool_t g_worker_pool;
+extern cpunode_httpd_t g_httpd;
 extern int g_port;
 
 int g_init_log(struct config *conf);
