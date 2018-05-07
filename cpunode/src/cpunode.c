@@ -2,8 +2,8 @@
 #include "wtk_vipkid_engine.h"
 
 #include "liblog.h"
-//#include "libconfig.h"
-//#include "libmacro.h"
+#include "libconfig.h"
+#include "libmacro.h"
 
 #include <event2/event.h>
 #include <event2/http.h>
