@@ -1,7 +1,8 @@
 #ifndef _CPUNODE_HANDLE_EVAL_H_
 #define _CPUNODE_HANDLE_EVAL_H_
 
-#include "global.h"
+#include <event2/event.h>
+#include <event2/http.h>
 
 #ifdef __cplusplus
 extern "C" {

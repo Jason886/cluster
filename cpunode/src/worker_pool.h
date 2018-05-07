@@ -16,10 +16,11 @@ extern "C" {
 
 typedef struct worker {
     pid_t pid;
-    int pipefd[2];
-    u_int16_t used;
+    int pipefd[2];  // 0-子进程使用 1-父进程使用
+    u_int16_t used; // 子进程使用
     int8_t alive;
     int8_t busy;
+    void *ud;       // 父进程使用
 } worker_t;
 
 typedef struct worker_pool {

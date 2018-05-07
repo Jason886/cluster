@@ -7,9 +7,7 @@
 #ifndef _CPUNODE_HTTPD_H_
 #define _CPUNODE_HTTPD_H_
 
-#include "liblog.h"
 #include "libconfig.h"
-#include "libmacro.h"
 
 #ifdef __cplusplus
 extern "C" {

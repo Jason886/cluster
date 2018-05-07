@@ -1,5 +1,9 @@
 #include "worker_pool.h"
-#include "global.h"
+
+#include "liblog.h"
+
+#include <event2/event.h>
+#include <event2/http.h>
 
 #include <sys/types.h>
 #include <sys/wait.h>

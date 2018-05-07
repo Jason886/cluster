@@ -1,6 +1,11 @@
-#include "global.h"
 #include "httpd.h"
 #include "handle_eval.h"
+#include "liblog.h"
+
+
+extern struct event_base *g_base;
+
+cpunode_httpd_t g_httpd = {0};
 
 static struct {
     char * path;
