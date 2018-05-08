@@ -73,6 +73,13 @@ task_t *task_get_head() {
     return NULL;
 }
 
+int task_is_end(task_t *task) {
+    if (task && task == &_head_guard) {
+        return 1;
+    }
+    return 0;
+}
+
 task_t *task_find_first(const char *token) {
     task_t *cur = (&_head_guard)->next;
     while (cur != (&_head_guard)) {

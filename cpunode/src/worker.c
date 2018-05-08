@@ -25,7 +25,7 @@ static struct timeval one_sec = { 0, 1000000};
 
 static void __timmer_cb(evutil_socket_t fd, short what, void *arg)
 {
-    printf("cb_func called times so far.\n");
+    //printf("child cb_func called times so far.\n");
     if (!evtimer_pending(__ev_timer, NULL)) {
         event_del(__ev_timer);
     }

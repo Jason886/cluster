@@ -2,11 +2,6 @@
 #include "handle_eval.h"
 #include "liblog.h"
 
-
-extern struct event_base *g_base;
-
-cpunode_httpd_t g_httpd = {0};
-
 static struct {
     char * path;
     void(*cb)(struct evhttp_request *, void *);
@@ -17,11 +12,21 @@ static struct {
 };
 #define ROUTER_NUM (sizeof(__router)/sizeof(__router[0]))
 
+extern struct event_base *g_base;
+cpunode_httpd_t g_httpd = {0};
+
 int cpunode_httpd_init(struct config *conf, int port) {
     struct event_base *base = g_base;
     struct evhttp *http = NULL;
     struct evhttp_bound_socket *bound_socket = NULL;
     int ix = 0;
+
+    g_eval_timer = evtimer_new(base, eval_timer_cb, NULL);
+    if (!g_eval_timer) {
+        loge("Couldn't bind to port %d. Exiting.\n", port);
+        goto _E;
+    }
+    evtimer_add(g_eval_timer, &g_eval_timeval);
 
     http = evhttp_new(base);
     if (!http) {
@@ -55,15 +60,27 @@ int cpunode_httpd_init(struct config *conf, int port) {
     return 0;
 
 _E:
+
     if (http) {
         evhttp_free(http);
     }
     memset(g_httpd, 0, sizeof(g_httpd));
+
+    if (g_eval_timer) {
+        event_free(g_eval_timer);
+        g_eval_timer = NULL;
+    }
+
     return -1;
 }
 
 
 void cpunode_httpd_free() {
+
+    if (g_eval_timer) {
+        event_free(g_eval_timer);
+        g_eval_timer = NULL;
+    }
     if (g_httpd.http) {
         evhttp_free(g_httpd.http);
         g_httpd.http = NULL;

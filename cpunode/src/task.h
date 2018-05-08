@@ -9,6 +9,8 @@ typedef struct task {
     struct task *next;
     struct task *prev;
 
+    int state:2; // 0-unworking, 1-working 
+
     char *req_path;
     char *token;
     char *appkey;
@@ -22,6 +24,7 @@ void task_free(task_t *task);
 
 void task_add_tail(task_t *task);
 task_t *task_get_head();
+int task_is_end(task_t *task);
 task_t *task_find_first(const char *token);
 void task_remove(task_t *task);
 

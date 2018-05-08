@@ -88,7 +88,9 @@ static void __unload_vipkid_engine_cfg() {
     }
 }
 
+
 int main(int argc, char *argv[]) {
+    int ret = -1;
     char *conf_path = "etc/cpunode.ini";
     int oc;
     int port = 9001; // 默认9001
@@ -136,9 +138,11 @@ int main(int argc, char *argv[]) {
     }
 
     event_base_dispatch(g_base);
-    return 0;
-
+    
+    ret = 0;
+    
 _E:
+    
     cpunode_httpd_free();
 
     if (g_base) {

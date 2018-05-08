@@ -20,6 +20,9 @@
 #define _PARAM_VALUE_SIZE 512
 #define _PARAM_SCANF_FMT "%*[^=]=\"%127[^\"]\"; filename=\"%511[^\"]\""
 
+struct event *g_eval_timer = NULL;
+struct timeval g_eval_timeval = { 0, 1000000}; 
+
 typedef struct eval_req_params {
     int _has_token:1;
     int _has_appkey:1;
@@ -254,4 +257,40 @@ void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
         __dispatch_error_1(req, 10002);
         return;
     }
+}
+
+void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
+    //printf("cb_func called times so far.\n");
+
+    task_t * task = task_get_head();
+    while (task && !task_is_end(task)) {
+        if (task->state == 1) { // working
+            printf("read task result\n");
+            if ("read done") {
+                printf("remove task\n");
+                task_t *rm = task;
+                task = task->next;
+                task_remove(rm);
+                task_free(rm);
+                continue;
+            }
+            // !!!not read done
+            task = task->next;
+            continue;
+        }
+
+        // state != 1
+        
+        if ("have free worker") {
+            printf("write task\n");
+            task->state = 1;
+            task = task->next;
+            continue;
+        }
+    }
+
+    if (!evtimer_pending(g_eval_timer, NULL)) {
+        event_del(g_eval_timer);
+    }
+    evtimer_add(g_eval_timer, &g_eval_timeval);
 }
