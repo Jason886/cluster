@@ -22,6 +22,20 @@ struct err_cfg {
 static struct err_cfg errors[] = {
     { 0, 0, "OK"},
 
+    { 10001, 1, "un-supported http method"},
+    { 10002, 1, "un-supported content type"},
+    { 10003, 1,  "no token"},
+    { 10004, 1,  "no appkey"},
+    { 10005, 1,  "invalid appkey"},
+    { 10006, 1,  "no secretkey"},
+    { 10007, 1, "auth failed"},
+    { 10008, 1, "upload file empty"},
+    { 10009, 1, "no fileurl"},
+    { 10010, 1, "server exception, task_new failed"},
+
+
+    { 20001, 1, "invalid request"},
+
     { 1010, 1, "the uploaded file data is invalid."},
     { 1011, 1, "the specific file not uploaded."},
 
@@ -63,6 +77,16 @@ void err_set(short errno, struct errinf * ei, ...) {
 
 end:
     _ERR_INF_LOG_ERR;
+}
+
+const char *cpunode_errmsg(short errno) {
+    int i = 0;
+    for (i = 0; i < ERR_NUM; i++) {
+        if (errors[i].errno == errno) {
+            return errors[i].fmt;
+        }
+    }
+    return "unknown error";
 }
 
 

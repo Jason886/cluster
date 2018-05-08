@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-void cpunode_handle_eval(struct evhttp_request *req, void *path);
+void cpunode_handle_eval(struct evhttp_request *req, void *arg);
 
 #ifdef __cplusplus
 }

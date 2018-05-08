@@ -52,7 +52,7 @@ static int __init_log(struct config *conf) {
         log_init(LOG_STDERR, NULL);
     }
     
-    loge("loglevel: %d, is_daemon: %d.\n", log_level, is_daemon);
+    logi("loglevel: %d, is_daemon: %d.\n", log_level, is_daemon);
 
     log_set_level(log_level);
 
@@ -94,8 +94,8 @@ void worker_run() {
     usleep(1000);
     printf("worker#%u setup\n", pool->idx);
 
-    cpunode_httpd_free();
     event_reinit(g_base);
+    cpunode_httpd_free();
     event_base_free(g_base);
     g_base = NULL;
     g_base = event_base_new();
@@ -105,6 +105,9 @@ void worker_run() {
     event_base_dispatch(g_base);
 
     while(1) {
+        sleep(1);
+        continue;
+        /*
         usleep(10000);
         worker_t *worker = &pool->workers[pool->idx];
         worker->used++;
@@ -112,6 +115,7 @@ void worker_run() {
             printf("worker#%u max used exit\n", pool->idx);
             exit(1);
         }
+        */
     }
 
     printf("worker#%u exit\n", pool->idx);

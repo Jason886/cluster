@@ -14,6 +14,8 @@ struct errinf {
 
 void err_set(short errno, struct errinf * ei, ...);
 
+const char *cpunode_errmsg(short errno);
+
 #ifdef __cplusplus
 }
 #endif
