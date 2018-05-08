@@ -88,40 +88,6 @@ static void __unload_vipkid_engine_cfg() {
     }
 }
 
-void worker_run() {
-    worker_pool_t *pool = g_worker_pool;
-
-    usleep(1000);
-    printf("worker#%u setup\n", pool->idx);
-
-    event_reinit(g_base);
-    cpunode_httpd_free();
-    event_base_free(g_base);
-    g_base = NULL;
-    g_base = event_base_new();
-    if (!g_base) {
-        exit(1);
-    }
-    event_base_dispatch(g_base);
-
-    while(1) {
-        sleep(1);
-        continue;
-        /*
-        usleep(10000);
-        worker_t *worker = &pool->workers[pool->idx];
-        worker->used++;
-        if (worker->used >= pool->max_use) {
-            printf("worker#%u max used exit\n", pool->idx);
-            exit(1);
-        }
-        */
-    }
-
-    printf("worker#%u exit\n", pool->idx);
-    exit(0);
-}
-
 int main(int argc, char *argv[]) {
     char *conf_path = "etc/cpunode.ini";
     int oc;
