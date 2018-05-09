@@ -1,6 +1,8 @@
 #ifndef _CPUNODE_TASK_H
 #define _CPUNODE_TASK_H
 
+#include <sys/types.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -10,6 +12,7 @@ typedef struct task {
     struct task *prev;
 
     int state:2; // 0-unworking, 1-working 
+    u_int16_t assign_worker_idx;
 
     char *req_path;
     char *token;

@@ -20,6 +20,8 @@
 #define _PARAM_VALUE_SIZE 512
 #define _PARAM_SCANF_FMT "%*[^=]=\"%127[^\"]\"; filename=\"%511[^\"]\""
 
+extern struct event_base *g_base;
+
 struct event *g_eval_timer = NULL;
 struct timeval g_eval_timeval = { 0, 1000000}; 
 
@@ -259,12 +261,22 @@ void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
     }
 }
 
+static void __task_readcb(struct bufferevent *bev, void *user_data) {
+    struct evbuffer *input = bufferevent_get_input(bev);
+    while (evbuffer_get_length(input) > 0) {
+        printf("read data\n");
+    }
+     printf("flushed answer\n");
+     bufferevent_free(bev);
+}
+
 void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
     //printf("cb_func called times so far.\n");
 
     task_t * task = task_get_head();
     while (task && !task_is_end(task)) {
         if (task->state == 1) { // working
+            /*
             printf("read task result\n");
             if ("read done") {
                 printf("remove task\n");
@@ -275,18 +287,45 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
                 continue;
             }
             // !!!not read done
+            */
             task = task->next;
             continue;
         }
 
         // state != 1
         
-        if ("have free worker") {
-            printf("write task\n");
-            task->state = 1;
+        u_int16_t free_idx = get_free_worker();
+        if (free_idx == 0) {
+            break;
+        }
+        task->assign_worker_idx = free_idx;
+        printf("task assign_worker_idx = %d\n", free_idx);
+
+        struct bufferevent *bev = bufferevent_socket_new(g_base, g_worker_pool->workers[free_idx].pipefd[1], BEV_OPT_CLOSE_ON_FREE);
+        if (!bev) {
+            // !!! 任务失败
             task = task->next;
             continue;
         }
+
+        bufferevent_setcb(bev, __task_readcb, NULL, NULL, task);
+        bufferevent_enable(bev, EV_READ);
+        bufferevent_enable(bev, EV_WRITE);
+
+	    bufferevent_write(bev, "he\0llo\nhahah\n", 13);
+        bufferevent_write(bev, WORKER_FRAME_MAGIC_HEAD, sizeof(WORKER_FRAME_MAGIC_HEAD));
+        bufferevent_write(bev, "\n", 1);
+
+        const char *cmd = "{\"fileurl\":\"10.0.200.20:5001/test.txt\"}";
+        bufferevent_write(bev, cmd, strlen(cmd));
+        bufferevent_write(bev, "\n", 1);
+        bufferevent_write(bev, "0\n", 2);
+        bufferevent_write(bev, "hellehello", 10);
+        printf("writed\n");
+        
+        task->state = 1;
+        task = task->next;
+        continue;
     }
 
     if (!evtimer_pending(g_eval_timer, NULL)) {

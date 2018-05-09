@@ -34,8 +34,8 @@ static void __on_sigchild(int sig) {
                 pool->workers[ix].used = 0;
                 close(pool->workers[ix].pipefd[1]);
 
-                if (socketpair(AF_UNIX, SOCK_STREAM, 0, pool->workers[ix].pipefd)) {
-                    loge("socketpair failed\n");
+                if (evutil_socketpair(AF_UNIX, SOCK_STREAM, 0, pool->workers[ix].pipefd)) {
+                    loge("evutil_socketpair failed\n");
                     continue;
                 }
 
@@ -111,8 +111,8 @@ int init_worker_pool(struct config *conf) {
         pool->workers[ix].alive = 0;
         pool->workers[ix].busy = 0;
 
-        if (socketpair(AF_UNIX, SOCK_STREAM, 0,  pool->workers[ix].pipefd)) {
-            loge("socketpair failed\n");
+        if (evutil_socketpair(AF_UNIX, SOCK_STREAM, 0,  pool->workers[ix].pipefd)) {
+            loge("evutil_socketpair failed\n");
             goto _E2;
         }
         pair_count = ix;
@@ -164,4 +164,16 @@ _E1:
         g_worker_pool = NULL;
     }
     return -1;
+}
+
+u_int16_t get_free_worker() {
+    u_int16_t i;
+    if (!g_worker_pool) return 0;
+    for (i = 1; i <= g_worker_pool->worker_num; i++) {
+        worker_t *worker = &(g_worker_pool->workers[i]);
+        if (worker->alive && !worker->busy) {
+            return i;
+        }
+    }
+    return 0;
 }
