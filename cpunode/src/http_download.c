@@ -10,50 +10,84 @@ typedef struct http_download {
     void *user_data;
 } http_download_t;
 
+
+
+
+
 static void __on_connection_close_cb(struct evhttp_connection *connection, void *arg) {
     logd("connection close\n");
+
     if (arg) {
         free(arg);
     }
 }
 
-static void __on_request_cb(struct evhttp_request *request, void *arg) {
-    http_download_t *download = NULL;
-    int rescode;
 
+
+
+
+
+
+
+static void __on_request_cb(struct evhttp_request *request, void *arg) {
     logd("__on_request_cb\n");
 
-    rescode = evhttp_request_get_response_code(request);
-    download = arg;
+    http_download_t *download = arg;
+    const char *uri = evhttp_request_get_uri(request);
 
-    if (rescode != 200) {
-        if (download->cb) {
-            download->cb(-1, 0, 0);
+    logd("uri %s\n", uri);
+
+    do {
+        int rescode = evhttp_request_get_response_code(request);
+        if (rescode != 200) {
+            loge("http rescode: %d, %s\n", rescode, uri);
+            if (download->cb) {
+                download->cb(-1, 0, 0);
+            }
+            break;
         }
-    } else {
-        struct evbuffer * input = evhttp_request_get_input_buffer(request);
-        size_t data_len = evbuffer_get_length(input);
-        char *data = malloc(data_len+1);
-        evbuffer_remove(input, data, data_len);
-        data[data_len] = 0;
-        if (download->cb) { // 如果有callback则由callback负责释放data
-            download->cb(0, data, data_len);
-        } else {
+
+        // rescode == 200
+
+        struct evbuffer *input = evhttp_request_get_input_buffer(request);
+        size_t length = evbuffer_get_length(input);
+        char *data = malloc(length+1);
+        if (!data) {
+            loge("malloc failed, %s\n", uri);
+            if (download->cb) {
+                download->cb(-1, 0, 0);
+            }
+            break;
+        }
+
+        int read_n = evbuffer_remove(input, data, length);
+        if (read_n < 0) {
+            loge("can't drain the buffer,%s\n", uri);
+            if (download->cb) {
+                download->cb(-1, 0, 0);
+            }
+            free(data);
+            break;
+        }
+
+        data[read_n] = 0;
+        if (download->cb) {
+            download->cb(0, data, read_n);
+            // 如果有回调，则不释放data,把data拥有权交给回调函数
+        }
+        else {
             free(data);
         }
-    }
-
-    struct evhttp_connection* connection = evhttp_request_get_connection(request);
-    if (connection) {
-        evhttp_connection_free(connection);
-    }
+        break;
+    } while(1);
 }
+
 
 int http_download_start (
         struct event_base *base,
-        const char *host,
-        unsigned int port,
-        const char *uri,
+        const char *url,
+
+
         void (*cb)(int result, char *data, unsigned int size),
         void *user_data
     ) {
@@ -61,27 +95,41 @@ int http_download_start (
     http_download_t *download = NULL;
     struct evhttp_connection *connection = NULL;
     struct evhttp_request *request = NULL;
+    struct evhttp_uri * evuri = NULL;
 
     if (!cb) {
-        loge("no cb\n");
+        loge("null cb, %s\n", url);
         return -1;
     }
 
     download = malloc(sizeof(*download));
     if (!download) {
-        loge("malloc failed\n");
+        loge("malloc failed, %s\n", url);
         return -1;
     }
     memset(download, 0, sizeof(*download));
     download->cb = cb;
     download->user_data = user_data;
 
-    connection = evhttp_connection_base_new(base, NULL, host, port);
-    if (!connection) {
-        loge("evhttp_connection_base_new failed\n");
+    evuri = evhttp_uri_parse(url);
+    if (!evuri) {
+        loge("invalid %s\n", url);
         free(download);
         return -1;
     }
+
+    const char *host = evhttp_uri_get_host(evuri);
+    int port = evhttp_uri_get_port(evuri);
+    if (port <= 0) port = 80;
+
+    connection = evhttp_connection_base_new(base, NULL, host, port);
+    if (!connection) {
+        loge("evhttp_connection_base_new failed, %s\n", url);
+        free(download);
+        evhttp_uri_free(evuri);
+        return -1;
+    }
+    evhttp_uri_free(evuri);
 
     evhttp_connection_set_timeout(connection, 30); // 30s超时
     evhttp_connection_set_retries(connection, 0);
@@ -90,7 +138,7 @@ int http_download_start (
 
     request = evhttp_request_new(__on_request_cb, download);
     if (!request) {
-        loge("evhttp_request_new failed\n");
+        loge("evhttp_request_new failed, %s\n", url);
         free(download);
         evhttp_connection_free(connection);
         return -1;
@@ -100,8 +148,9 @@ int http_download_start (
                 connection,
                 request,
                 EVHTTP_REQ_GET,
-                uri) ) {
-       loge("evhttp_make_request failed\n");
+                url)
+        ) {
+       loge("evhttp_make_request failed, %s\n", url);
        free(download); 
        evhttp_connection_free(connection);
        return -1;

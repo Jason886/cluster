@@ -94,7 +94,27 @@ static void __do_calc() {
     printf("__do_calc data = %s\n", _worker_pri.data);
 }
 
+static void __result_callback_cb(int result, char *data, unsigned int size) {
+    printf("result = %d\n", result);
+    printf("data = %s\n", data);
+    printf("size = %d\n", size);
+}
+
 static void __result_callback() {
+    printf("result_cb\n");
+
+    if (http_post (
+                _worker_pri.base, 
+                "http://192.168.2.9:5001/callback",
+                "this is result\n", 
+                strlen("this is result"), 
+                __result_callback_cb,
+                NULL
+            )
+        ) {
+        
+        printf("post failed\n");
+    }
 }
 
 static void __download_cb(int result, char *data, unsigned int size) {
@@ -132,11 +152,23 @@ static void __calc() {
         return;
     }
 
+
+    const char * url = "http://www.baidu.com/what?haha=kkk&uiuuu=oooo#heihei";
+    struct evhttp_uri * ev_uri = evhttp_uri_parse(url);
+    printf("ev_uri = %p\n", ev_uri);
+    printf("!!!! host = %s\n", evhttp_uri_get_host(ev_uri));
+    printf("!!!! path = %s\n", evhttp_uri_get_path(ev_uri));
+    printf("!!!! prot = %d\n", evhttp_uri_get_port(ev_uri));
+    printf("!!!! q = %s\n", evhttp_uri_get_query(ev_uri));
+    printf("!!! scheme = %s\n", evhttp_uri_get_scheme(ev_uri));
+    printf("!!! frag =%s\n", evhttp_uri_get_fragment(ev_uri));
+    printf("!!! user = %s\n", evhttp_uri_get_userinfo (ev_uri));
+
+    evhttp_uri_free(ev_uri);
+
     if (http_download_start(
             _worker_pri.base,
-            "10.0.200.20",
-            5001,
-            "/test.txt",
+            "http://192.168.2.9:5001/test.txt",
             __download_cb, 
             NULL)) {
         __result_callback();

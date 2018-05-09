@@ -9,10 +9,8 @@ extern "C" {
 
 int http_download_start (
         struct event_base *base, 
-        const char *host,
-        unsigned int port,
-        const char *uri,
-        void (*cb)(int result, char *data, unsigned int size),
+        const char *url,
+        void (*cb)(int result, char *data, unsigned int size),  // note: callback中返回的data，由你来释放. 
         void *user_data
     );
 

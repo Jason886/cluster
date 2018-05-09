@@ -10,9 +10,9 @@ extern "C" {
 int http_post (
         struct event_base *base, 
         const char *url,
-        const char *post,
-        size_t post_size,
-        void (*cb)(int result, char *data, unsigned int size),
+        const char *data,
+        size_t size,
+        void (*cb)(int result, char *data, unsigned int size), // note: callback中返回的data，你不需要释放。如果需要保存data里的数据，请拷贝出.
         void *user_data
     );
 
