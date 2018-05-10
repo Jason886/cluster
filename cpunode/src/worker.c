@@ -24,8 +24,8 @@
 #include <errno.h>
 #include <fcntl.h>
 
-extern struct event_base *g_base;
 extern wtk_vipkid_engine_cfg_t *g_vipkid_engine_cfg;
+extern struct event_base *g_worker_base;
 
 typedef enum {
     e_worker_state_idle = 0,    // 空闲
@@ -39,7 +39,7 @@ typedef enum {
 typedef struct worker_private {
     worker_t *worker;
     e_worker_state state;
-    struct event_base *base;
+    //struct event_base *base;
     struct bufferevent *bev; 
 
     char *cmd;
@@ -125,8 +125,8 @@ static void __result_callback(char *result) {
     // write
 
     if (http_post (
-                _worker_pri.base, 
-                "http://10.0.200.20:5001/callback",
+                g_worker_base, 
+                "http://192.168.2.9:5001/callback",
                 "this is result\n", 
                 strlen("this is result"), 
                 __result_callback_cb,
@@ -159,6 +159,7 @@ static void __download_cb(int result, char *data, unsigned int size) {
 static void __calc() {
     struct evbuffer *output = bufferevent_get_output(_worker_pri.bev);
     char errmsg[512];
+    printf("__check_data\n");
 
     if (__check_data(errmsg, sizeof(errmsg))) {
         printf("check_data error\n");
@@ -166,6 +167,7 @@ static void __calc() {
         _worker_pri.state = e_worker_state_idle;
         return;
     }
+    printf("after check_data\n");
 
     if (_worker_pri.data && _worker_pri.data_len > 0) {
         char *result = __do_calc();
@@ -176,8 +178,8 @@ static void __calc() {
     printf("download start\n");
 
     if (http_download_start(
-            _worker_pri.base,
-            "http://10.0.200.20:5001/test.txt",
+            g_worker_base, 
+            "http://192.168.2.9:5001/test.txt",
             __download_cb, 
             NULL)) {
         __result_callback("download start failed");
@@ -185,9 +187,22 @@ static void __calc() {
     }
 }
 
+static void __worker_eventcb(struct bufferevent *bev, short events, void *user_data) {
+    printf("__worker_eventcb\n");
+}
 
+
+static void __worker_writecb(struct bufferevent *bev, void *user_data) {
+    printf("__worker_writecb\n");
+    struct evbuffer *output = bufferevent_get_output(bev);
+     if (evbuffer_get_length(output) == 0) {
+         //printf("flushed answer\n");
+         //bufferevent_free(bev);
+     }
+}
 
 static void __worker_readcb(struct bufferevent *bev, void *user_data) {
+    printf("__worker_readcb\n");
     struct evbuffer *input = bufferevent_get_input(bev);
     struct evbuffer *output = bufferevent_get_output(bev);
     char *tmp;
@@ -270,10 +285,13 @@ void worker_run() {
     usleep(1000);
     logi("worker#%u setup\n", pool->idx);
 
-    event_reinit(g_base);
-    cpunode_httpd_free();
-    event_base_free(g_base);
-    g_base = NULL;
+    //event_reinit(g_base);
+    //cpunode_httpd_free();
+    //event_base_free(g_base);
+    //g_base = NULL;
+    //
+    
+    /*
 
     struct event_base *base = event_base_new();
     if (!base) {
@@ -281,8 +299,11 @@ void worker_run() {
         sleep(2);
         exit(1);
     }
+    */
 
     worker_t *worker = &(pool->workers[pool->idx]);
+
+    /*
 
     struct bufferevent *bev = bufferevent_socket_new(base, worker->pipefd[0], 0);
     if (!bev) {
@@ -294,17 +315,41 @@ void worker_run() {
     bufferevent_setcb(bev, __worker_readcb, NULL, NULL, NULL);
     bufferevent_enable(bev, EV_READ);
     bufferevent_enable(bev, EV_WRITE);
+    */
 
     memset(&_worker_pri, 0, sizeof(_worker_pri));
     _worker_pri.worker = &pool->workers[pool->idx];
     _worker_pri.state = e_worker_state_idle;
-    _worker_pri.base = base;
-    _worker_pri.bev = bev;
+    //_worker_pri.base = g_worker_base;
+    //_worker_pri.bev = bev;
 
     logi("worker#%u setup ok, loop\n", pool->idx);
 
-    event_base_dispatch(base);
+    event_base_dispatch(g_worker_base);
+    // close listener
+    // close base
 
     logi("worker#%u exit\n", pool->idx);
     exit(0);
+}
+
+void worker_listener_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *sa, int socklen, void *user_data) {
+
+    printf("worker listened\n");
+    struct bufferevent *bev = NULL;
+    bev = bufferevent_socket_new(g_worker_base, fd, BEV_OPT_CLOSE_ON_FREE);
+    if (!bev) {
+       fprintf(stderr, "Error constructing bufferevent!");
+       event_base_loopbreak(g_worker_base);
+       return;
+    }
+    _worker_pri.bev = bev;
+    printf("worker create bev\n");
+
+    bufferevent_setcb(bev, __worker_readcb, __worker_writecb, __worker_eventcb, NULL);
+    bufferevent_enable(bev, EV_WRITE);
+    bufferevent_enable(bev, EV_READ);
+}
+void worker_accept_error_cb(struct evconnlistener *listener, void *ctx) {
+    printf("worker accept error\n");
 }

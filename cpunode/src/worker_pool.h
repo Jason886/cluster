@@ -19,8 +19,8 @@ extern "C" {
 
 typedef struct worker {
     pid_t pid;
-    evutil_socket_t pipefd[2];  // 0-子进程使用 1-父进程使用
-    struct bufferevent *bev;
+    //evutil_socket_t pipefd[2];  // 0-子进程使用 1-父进程使用
+    //struct bufferevent *bev;
     u_int16_t used; // 子进程使用
     int8_t alive;
     int8_t busy;

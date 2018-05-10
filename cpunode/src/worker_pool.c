@@ -8,6 +8,7 @@
 #include <event2/bufferevent.h>
 #include <event2/http.h>
 #include <event2/http_struct.h>
+#include <event2/listener.h>
 
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -17,9 +18,15 @@
 #include <fcntl.h>
 
 extern void worker_run();
+extern void worker_listener_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *sa, int socklen, void *user_data);
+extern void worker_accept_error_cb(struct evconnlistener *listener, void *ctx);
+extern struct event_base *g_base;
+extern int g_base_worker_port;
 
 worker_pool_t *g_worker_pool = NULL;
-extern struct event_base *g_base;
+struct event_base *g_worker_base = NULL;
+struct evconnlistener * g_worker_listener = NULL;
+
 
 static void __on_sigchild(int sig) {
     worker_pool_t *pool = g_worker_pool;
@@ -34,41 +41,68 @@ static void __on_sigchild(int sig) {
                     continue;
                 }
 
+                struct sockaddr_in sin;
+                memset(&sin, 0, sizeof(sin));
+                sin.sin_family = AF_INET;
+                sin.sin_addr.s_addr = htonl(0);
+                printf("worker#%u listen %d\n", ix, g_base_worker_port+ix);
+                sin.sin_port = htons(g_base_worker_port+ix);
+
                 pool->workers[ix].alive = 0;
                 pool->workers[ix].busy = 0;
                 pool->workers[ix].used = 0;
-                if (pool->workers[ix].bev) {
-                    bufferevent_free(pool->workers[ix].bev);
-                    pool->workers[ix].bev = NULL;
-                }
-                close(pool->workers[ix].pipefd[1]);
+                //if (pool->workers[ix].bev) {
+                //    bufferevent_free(pool->workers[ix].bev);
+                //    pool->workers[ix].bev = NULL;
+                //}
+                //close(pool->workers[ix].pipefd[1]);
 
                 // !!! 将task列表中该项的绑定删除 // 并取消bev的监听
-
-
-                if (evutil_socketpair(AF_UNIX, SOCK_STREAM, 0, pool->workers[ix].pipefd)) {
-                    loge("evutil_socketpair failed\n");
+                
+                struct event_base * worker_base = event_base_new();
+                if (!worker_base) {
+                    loge("create event_base for worker#%u failed\n", ix);
                     continue;
                 }
 
-                flags = fcntl(pool->workers[ix].pipefd[0], F_GETFL, 0);
-                fcntl(pool->workers[ix].pipefd[0], F_SETFL, flags|O_NONBLOCK);
-                flags = fcntl(pool->workers[ix].pipefd[1], F_GETFL, 0);
-                fcntl(pool->workers[ix].pipefd[1], F_SETFL, O_NONBLOCK);
+                struct evconnlistener *listener = evconnlistener_new_bind(worker_base, worker_listener_cb, NULL, 
+                        LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE, -1, 
+                        (struct sockaddr*)&sin, sizeof(sin));
+                if (!listener) {
+                    loge("listener at %d for worker#%u failed\n", g_base_worker_port+ix, ix);
+                    // !!! close base
+                    continue;
+                }
+                evconnlistener_set_error_cb(listener, worker_accept_error_cb);
+
+                //if (evutil_socketpair(AF_UNIX, SOCK_STREAM, 0, pool->workers[ix].pipefd)) {
+                //    loge("evutil_socketpair failed\n");
+                //    continue;
+                //}
+
+                //flags = fcntl(pool->workers[ix].pipefd[0], F_GETFL, 0);
+                //fcntl(pool->workers[ix].pipefd[0], F_SETFL, flags|O_NONBLOCK);
+                //flags = fcntl(pool->workers[ix].pipefd[1], F_GETFL, 0);
+                //fcntl(pool->workers[ix].pipefd[1], F_SETFL, O_NONBLOCK);
 
                 pool->workers[ix].pid = fork();
                 if (pool->workers[ix].pid < 0) {
-                    logi("fork worker#%u failed\n", ix);
-                    close(pool->workers[ix].pipefd[0]);
-                    close(pool->workers[ix].pipefd[1]);
+                    loge("fork worker#%u failed\n", ix);
+                    evconnlistener_free(listener);
+                    event_base_free(worker_base);
+
+                    //close(pool->workers[ix].pipefd[0]);
+                    //close(pool->workers[ix].pipefd[1]);
                     continue;
                 }
 
                 if (pool->workers[ix].pid > 0) {
                     // father
                     logi("fork worker#%u ok, pid = %d\n", ix, pool->workers[ix].pid);
-                    close(pool->workers[ix].pipefd[0]);
-                    pool->workers[ix].bev = bufferevent_socket_new(g_base, pool->workers[ix].pipefd[1], 0);
+                    evconnlistener_free(listener);
+                    event_base_free(worker_base);
+                    //close(pool->workers[ix].pipefd[0]);
+                    //pool->workers[ix].bev = bufferevent_socket_new(g_base, pool->workers[ix].pipefd[1], 0);
                     /* !!! 如果创建失败
                     if() {
                     }
@@ -77,13 +111,21 @@ static void __on_sigchild(int sig) {
                     continue; 
                 } else {
                     // child
-                    int iii = 0;
-                    for (iii = 1; iii <= pool->worker_num; ++iii) {
-                        if (iii != ix) {
-                            close(pool->workers[iii].pipefd[1]);
-                        }
-                    }
+                    //int iii = 0;
+                    //for (iii = 1; iii <= pool->worker_num; ++iii) {
+                    //    if (iii != ix) {
+                    //        close(pool->workers[iii].pipefd[1]);
+                    //    }
+                    //}
+                    event_reinit(g_base);
+                    cpunode_httpd_free();
+                    event_base_free(g_base);
+                    g_base = NULL;
+
+                    g_worker_base = worker_base;
+                    g_worker_listener = listener;
                     pool->idx = ix;
+
                     worker_run();
                     exit(0);
                 }
@@ -128,16 +170,40 @@ int init_worker_pool(struct config *conf) {
         pool->workers[ix].alive = 0;
         pool->workers[ix].busy = 0;
 
-        if (evutil_socketpair(AF_UNIX, SOCK_STREAM, 0,  pool->workers[ix].pipefd)) {
-            loge("evutil_socketpair failed\n");
+        struct sockaddr_in sin;
+        memset(&sin, 0, sizeof(sin));
+        sin.sin_family = AF_INET;
+        sin.sin_addr.s_addr = htonl(0);
+        printf("worker#%u listen %d\n", ix, g_base_worker_port+ix);
+        sin.sin_port = htons(g_base_worker_port+ix);
+
+        struct event_base * worker_base = event_base_new();
+        if (!worker_base) {
+            loge("create event_base for worker#%u failed\n", ix);
             goto _E2;
         }
-        pair_count = ix;
 
-        flags = fcntl(pool->workers[ix].pipefd[0], F_GETFL, 0);
-        fcntl(pool->workers[ix].pipefd[0], F_SETFL, flags|O_NONBLOCK);
-        flags = fcntl(pool->workers[ix].pipefd[1], F_GETFL, 0);
-        fcntl(pool->workers[ix].pipefd[1], F_SETFL, O_NONBLOCK);
+        struct evconnlistener *listener = evconnlistener_new_bind(worker_base, worker_listener_cb, NULL, 
+                LEV_OPT_REUSEABLE|LEV_OPT_CLOSE_ON_FREE, -1, 
+                (struct sockaddr*)&sin, sizeof(sin));
+        if (!listener) {
+            loge("listener at %d for worker#%u failed\n", g_base_worker_port+ix, ix);
+            goto _E2;
+        }
+
+        evconnlistener_set_error_cb(listener, worker_accept_error_cb);
+
+
+        //if (evutil_socketpair(AF_UNIX, SOCK_STREAM, 0,  pool->workers[ix].pipefd)) {
+        //    loge("evutil_socketpair failed\n");
+        //    goto _E2;
+        //}
+        //pair_count = ix;
+
+        //flags = fcntl(pool->workers[ix].pipefd[0], F_GETFL, 0);
+        //fcntl(pool->workers[ix].pipefd[0], F_SETFL, flags|O_NONBLOCK);
+        //flags = fcntl(pool->workers[ix].pipefd[1], F_GETFL, 0);
+        //fcntl(pool->workers[ix].pipefd[1], F_SETFL, O_NONBLOCK);
 
         pool->workers[ix].pid = fork();
         if (pool->workers[ix].pid < 0) {
@@ -149,8 +215,11 @@ int init_worker_pool(struct config *conf) {
         if (pool->workers[ix].pid > 0) {
             // father
             logi("fork worker#%u ok, pid = %d\n", ix, pool->workers[ix].pid);
-            close(pool->workers[ix].pipefd[0]);
-            pool->workers[ix].bev = bufferevent_socket_new(g_base, pool->workers[ix].pipefd[1], 0);
+            evconnlistener_free(listener);
+            event_base_free(worker_base);
+            
+            //close(pool->workers[ix].pipefd[0]);
+            //pool->workers[ix].bev = bufferevent_socket_new(g_base, pool->workers[ix].pipefd[1], 0);
             /* !!! 如果创建失败
             if() {
             }
@@ -159,11 +228,21 @@ int init_worker_pool(struct config *conf) {
             continue; 
         } else {
             // child
-            int iii = 0;
-            for (iii = 1; iii <= pair_count; ++iii) {
-                close(pool->workers[iii].pipefd[1]);
-            }
+            //int iii = 0;
+            //for (iii = 1; iii <= pair_count; ++iii) {
+            //    close(pool->workers[iii].pipefd[1]);
+            //}
+            
+            event_reinit(g_base);
+            cpunode_httpd_free();
+            event_base_free(g_base);
+            g_base = NULL;
+
+            event_reinit(worker_base);
+            g_worker_base = worker_base;
+            g_worker_listener = listener;
             pool->idx = ix;
+
             worker_run();
             exit(0);
         }
@@ -172,13 +251,16 @@ int init_worker_pool(struct config *conf) {
     return 0;
 
 _E2:
+
+    /*
     for (ix = 1; ix <= pair_count; ++ix) {
         close(pool->workers[ix].pipefd[1]);
         if (ix > fork_count) {
             close(pool->workers[ix].pipefd[0]);
         }
     }
-    free(pool->workers);
+    */
+    //free(pool->workers);
 
 _E1:
     if (g_worker_pool) {

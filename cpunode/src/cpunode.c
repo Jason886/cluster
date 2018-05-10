@@ -17,6 +17,7 @@
 
 struct config *g_conf = NULL;
 struct event_base *g_base = NULL;
+int g_base_worker_port = 7000;
 wtk_vipkid_engine_cfg_t *g_vipkid_engine_cfg = NULL;
 
 static int __init_log(struct config *conf) {
@@ -92,16 +93,23 @@ static void __unload_vipkid_engine_cfg() {
 int main(int argc, char *argv[]) {
     int ret = -1;
     char *conf_path = "etc/cpunode.ini";
-    int oc;
     int port = 9001; // 默认9001
+    char *task_file = "bin/task_list_01.json"; 
+    int oc;
 
-    while ((oc = getopt(argc, argv, "c:p:")) != -1) {  
+    while ((oc = getopt(argc, argv, "c:p:t:b:")) != -1) {  
         switch (oc) {  
             case 'c':
                 conf_path = optarg;  
                 break;  
             case 'p':
                 port = atoi(optarg);  
+                break;
+            case 't':
+                task_file = optarg;
+                break;
+            case 'b':
+                g_base_worker_port = atoi(optarg);
                 break;
             default:
                 printf("unknown options\n");  

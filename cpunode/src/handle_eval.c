@@ -21,6 +21,7 @@
 #define _PARAM_SCANF_FMT "%*[^=]=\"%127[^\"]\"; filename=\"%511[^\"]\""
 
 extern struct event_base *g_base;
+extern int g_base_worker_port;
 
 struct event *g_eval_timer = NULL;
 struct timeval g_eval_timeval = { 0, 1000000}; 
@@ -303,6 +304,13 @@ void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
     }
 }
 
+static void __task_eventcb(struct bufferevent *bev, short events, void *user_data) {
+    printf("__task_eventcb\n");
+}
+
+static void __task_writecb(struct bufferevent *bev, void *user_data) {
+}
+
 static void __task_readcb(struct bufferevent *bev, void *user_data) {
     task_t *task = user_data;
     struct evbuffer *input = bufferevent_get_input(bev);
@@ -407,23 +415,45 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
                 task->binded = 1;
                 task->bind_worker_idx = free_idx;
                 logi("bind task %s to worker#%d\n", task->token, free_idx);
+
+                struct bufferevent *bev = bufferevent_socket_new(g_base, -1, BEV_OPT_CLOSE_ON_FREE);
+
+                //struct bufferevent *bev = bufferevent_socket_new(g_base, g_worker_pool->workers[free_idx].pipefd[1], 0);
                 
-                struct bufferevent *bev = g_worker_pool->workers[free_idx].bev;
+                //struct bufferevent *bev = g_worker_pool->workers[free_idx].bev;
                 //struct bufferevent *bev = bufferevent_socket_new(g_base, g_worker_pool->workers[free_idx].pipefd[1], 0);
                 //if (!bev) {
                 //    task = task_get_next(task);
                 //    continue;
                 //}
                 // !!! 清空管道的input
+                //
+                printf("111111\n");
 
-                bufferevent_setcb(bev, __task_readcb, NULL, NULL, task);
+                bufferevent_setcb(bev, __task_readcb, __task_writecb, __task_eventcb, task);
                 bufferevent_enable(bev, EV_READ);
                 bufferevent_enable(bev, EV_WRITE);
+                printf("22222\n");
+
+                struct sockaddr_in sin;
+                memset(&sin, 0, sizeof(sin));
+                sin.sin_family = AF_INET;
+                sin.sin_addr.s_addr = inet_addr("127.0.0.1");
+                sin.sin_port = htons(g_base_worker_port+free_idx);
+                printf("33333\n");
+
+                if (bufferevent_socket_connect(bev, (struct sockaddr*)&sin, sizeof(sin))) {
+                    printf("connect error\n");
+                    // !!! error
+                }
+                printf("4444\n");
 
                 // 向管道写
                 bufferevent_write(bev, "\n", 1);
                 bufferevent_write(bev, WORKER_FRAME_MAGIC_HEAD, sizeof(WORKER_FRAME_MAGIC_HEAD));
                 bufferevent_write(bev, "\n", 1);
+
+                printf("55555\n");
 
                 char *ori_req = cJSON_PrintUnformatted(task->j_req);
                 bufferevent_write(bev, ori_req, strlen(ori_req));
@@ -438,6 +468,8 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
                     bufferevent_write(bev, "0\n", 2);
                 }
                 bufferevent_write(bev, "\n", 1);
+
+                printf("66666\n");
             }
         }
 
@@ -478,15 +510,3 @@ u_int16_t get_free_worker() {
     }
     return 0;
 }
-
-    /*
-int bind_worker(task_t *task, u_int16_t idx) {
-    if (!task) {
-        return -1;
-    }
-    if (idx > g_worker_pool.worker_num) {
-        return -1;
-    }
-
-}
-    */
