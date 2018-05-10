@@ -26,12 +26,13 @@ static struct err_cfg errors[] = {
     { 10002, 1, "un-supported content type"},
     { 10003, 1,  "no token"},
     { 10004, 1,  "no appkey"},
-    { 10005, 1,  "invalid appkey"},
+    { 10005, 1,  ""},
     { 10006, 1,  "no secretkey"},
     { 10007, 1, "auth failed"},
-    { 10008, 1, "upload file empty"},
-    { 10009, 1, "no fileurl"},
-    { 10010, 1, "server exception, task_new failed"},
+    { 10008, 1, "upload file empty or no fileurl"},
+    { 10009, 1, "server internal error"},
+    { 10010, 1, "no callback"},
+    { 10011, 1, "internal error"},
 
 
     { 20001, 1, "invalid request"},

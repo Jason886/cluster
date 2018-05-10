@@ -41,9 +41,11 @@ typedef struct eval_req_params {
     struct evbuffer *ev_file;
 } eval_req_params_t;
 
-static void __dispatch_error_1(struct evhttp_request *req, int errno) {
+static void __dispatch_error_1(struct evhttp_request *req, int errno, const char *errmsg) {
     if (req) {
-        const char *errmsg = cpunode_errmsg(errno);
+        if (errmsg == NULL) {
+            errmsg = cpunode_errmsg(errno);
+        } 
         struct evbuffer *evb = evbuffer_new();
         evbuffer_add_printf(evb, "{\"error\":{\"errno\":%d,\"info\":\"%s\"}}", errno, errmsg);
         // !!! loge
@@ -141,93 +143,109 @@ static int __fill_req_params(struct evhttp_request *req, const char *boundary, e
 }
 
 static void __handle(struct evhttp_request *req, const char *boundary) {
-    int errno;
-
     eval_req_params_t req_params = {0};
+    int errno = 0;
+    char *data = NULL;
+    size_t size = 0;
+    task_t *task = NULL;
+    struct cJSON *j_req = NULL;
+    const char *uri = evhttp_request_get_uri(req);
 
     errno = __fill_req_params(req, boundary, &req_params);
     if (errno) {
-        if (req_params.ev_file) {
-            evbuffer_free(req_params.ev_file);
-            req_params.ev_file = 0;
-        }
-        __dispatch_error_1(req, errno);
-        return;
+        goto _E;
     }
 
-    printf("has_token:%d\n", req_params._has_token);
-    printf("has_appkey:%d\n", req_params._has_appkey);
-    printf("has_secretkey:%d\n", req_params._has_secretkey);
-    printf("has_callback:%d\n", req_params._has_callback);
-    printf("has_fileurl:%d\n", req_params._has_fileurl);
-    printf("has_compress:%d\n", req_params._has_compress);
-    printf("token = [%s]\n", req_params.token);
-    printf("appkey:%s\n", req_params.appkey);
-    printf("secretkey:%s\n", req_params.secretkey);
-    printf("callback:%s\n", req_params.callback);
-    printf("fileurl:%s\n", req_params.fileurl);
-    printf("compress:%d\n", req_params.compress);
-    printf("ev_file: %p\n", req_params.ev_file);
-
-    // !!! need trim
     if (!req_params._has_token || strlen(req_params.token) == 0) {
-        __dispatch_error_1(req, 10003);
-        return;
+        __dispatch_error_1(req, 10003, NULL);
+        goto _E;
     }
-    // !!! need trim
+
     if (!req_params._has_appkey || strlen(req_params.appkey) == 0) {
-        __dispatch_error_1(req, 10004);
-        return;
+        __dispatch_error_1(req, 10004, NULL);
+        goto _E;
     }
-    // !!! invalid appkey 10005
     
     if (!req_params._has_secretkey || strlen(req_params.secretkey) == 0) {
-        __dispatch_error_1(req, 10006);
-        return;
+        __dispatch_error_1(req, 10006, NULL);
+        goto _E;
+    }
+
+    if (!req_params.ev_file || evbuffer_get_length(req_params.ev_file) == 0) {
+        if (!req_params._has_fileurl || strlen(req_params.fileurl) == 0) {
+            __dispatch_error_1(req, 10008, NULL);
+            goto _E;
+        }
     }
 
     // !!! auth 10007
-    
-    if (req_params._has_callback && strlen(req_params.callback) > 0) {
-        if (req_params.ev_file) {
-            if (evbuffer_get_length(req_params.ev_file) == 0) {
-                __dispatch_error_1(req, 10008);
-                return;
-            }
 
-            __dispatch_error_1(req, 20001);
-            return;
-        }
+    if (req_params.ev_file) {
+        data = EVBUFFER_DATA(req_params.ev_file);
+        size = EVBUFFER_LENGTH(req_params.ev_file);
+    }
 
-        if (!req_params._has_fileurl || strlen(req_params.fileurl) == 0) {
-            __dispatch_error_1(req, 10009);
-            return;
-        }
+    // create j_req
+    j_req = cJSON_CreateObject();
+    if (!j_req) {
+        __dispatch_error_1(req, 10009, "internal error, handle_eval create j_req");
+        goto _E;
+    }
+    if (req_params._has_token) {
+        cJSON_AddStringToObject(j_req, "token", req_params.token);
+    }
+    if (req_params._has_appkey) {
+        cJSON_AddStringToObject(j_req, "appkey", req_params.appkey);
+    }
+    if (req_params._has_secretkey) {
+        cJSON_AddStringToObject(j_req, "secretkey", req_params.secretkey);
+    }
+    if (req_params._has_callback) {
+        cJSON_AddStringToObject(j_req, "callback", req_params.callback);
+    }
+    if (req_params._has_fileurl) {
+        cJSON_AddStringToObject(j_req, "fileurl", req_params.fileurl);
+    }
+    if (req_params._has_compress) {
+        cJSON_AddNumberToObject(j_req, "compress", req_params.compress);
+    }
 
-        const char *uri = evhttp_request_get_uri(req);
-        task_t *task = task_new(uri, req_params.token, req_params.appkey, req_params.secretkey, req_params.fileurl, req_params.callback);
-        if (!task) {
-            __dispatch_error_1(req, 10010);
-            return;
-        }
+    task = task_new(uri, j_req, data, size);
+    if (!task) {
+        __dispatch_error_1(req, 10009, "internal error, task_new failed");
+        goto _E;
+    }
+
+    if (req_params.ev_file) {
+        evbuffer_free(req_params.ev_file);
+        req_params.ev_file = 0;
+    }
+
+    if (task->is_async) {
         task_add_tail(task);
-
+        char *ori_req = cJSON_PrintUnformatted(j_req);
         struct evbuffer *evb = evbuffer_new();
-        evbuffer_add_printf(evb, "{\"token\":\"%s\"}", req_params.token);
+        evbuffer_add_printf(evb, "{\"token\":\"%s\", \"request\":%s}", req_params.token, ori_req?ori_req:"null");
         evhttp_send_reply(req, 200, "OK", evb);
+        if (ori_req) free(ori_req);
         evbuffer_free(evb);
-        return;
-
     } else {
-        __dispatch_error_1(req, 20001);
-        return;
+        __dispatch_error_1(req, 10010, NULL);
+        goto _E;
     }
     
-    // 如果是同步任务，判断并发数，如果未超并发，则判断是否有空闲进程，如果有空闲进程，写入工作进程。
-    // 如果是异步任务，写入队列
-    // IO进程上的定时器从队列中取请求，判断并发数，写入工作进程。
-    //_do_analyze(&inputs, ev_file, &res);
+    return;
 
+_E:
+    if (j_req) {
+        cJSON_Delete(j_req);
+        j_req = NULL;
+    }
+    if (req_params.ev_file) {
+        evbuffer_free(req_params.ev_file);
+        req_params.ev_file = 0;
+    }
+    return;
 }
 
 void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
@@ -245,7 +263,7 @@ void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
 
     if (!((method == EVHTTP_REQ_GET) || (method == EVHTTP_REQ_POST))) {
         loge("un-supported http method: %d\n", method);
-        __dispatch_error_1(req, 10001);
+        __dispatch_error_1(req, 10001, NULL);
         return;
     }
 
@@ -256,27 +274,84 @@ void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
         return;
     } else {
         loge("un-supported content type: %s\n", content_type);
-        __dispatch_error_1(req, 10002);
+        __dispatch_error_1(req, 10002, NULL);
         return;
     }
 }
 
 static void __task_readcb(struct bufferevent *bev, void *user_data) {
+    task_t *task = user_data;
     struct evbuffer *input = bufferevent_get_input(bev);
     while (evbuffer_get_length(input) > 0) {
-        printf("read data\n");
+        int len = evbuffer_get_length(input);
+        char *data = malloc(len+1);
+        memset(data, 0, len+1);
+        evbuffer_remove(input, data, len);
+        printf("read result %s\n", data);
+        free(data);
     }
-     printf("flushed answer\n");
-     bufferevent_free(bev);
+    //bufferevent_free(bev);
+    task->binded = 0;
+    task->bind_worker_idx = 0;
+
+    task_remove(task);
 }
 
 void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
+
     //printf("cb_func called times so far.\n");
 
     task_t * task = task_get_head();
+    while (task) {
+                // 这一段设置为不可中断
+                
+        if (!task->binded) {
+            int free_idx = get_free_worker();
+            if (free_idx > 0) {
+                // bind
+                task->binded = 1;
+                task->bind_worker_idx = free_idx;
+                logi("bind task %s to worker#%d\n", task->token, free_idx);
+                
+                struct bufferevent *bev = g_worker_pool->workers[free_idx].bev;
+                //struct bufferevent *bev = bufferevent_socket_new(g_base, g_worker_pool->workers[free_idx].pipefd[1], 0);
+                //if (!bev) {
+                //    task = task_get_next(task);
+                //    continue;
+                //}
+                // 清空管道的input
+
+                bufferevent_setcb(bev, __task_readcb, NULL, NULL, task);
+                bufferevent_enable(bev, EV_READ);
+                bufferevent_enable(bev, EV_WRITE);
+
+                // 向管道写
+                bufferevent_write(bev, "\n", 1);
+                bufferevent_write(bev, WORKER_FRAME_MAGIC_HEAD, sizeof(WORKER_FRAME_MAGIC_HEAD));
+                bufferevent_write(bev, "\n", 1);
+
+                char *ori_req = cJSON_PrintUnformatted(task->j_req);
+                bufferevent_write(bev, ori_req, strlen(ori_req));
+                free(ori_req);
+                bufferevent_write(bev, "\n", 1);
+                if (task->data && task->size > 0) {
+                    char tmp[128];
+                    snprintf(tmp, sizeof(tmp), "%d\n", task->size);
+                    bufferevent_write(bev, tmp, strlen(tmp));
+                    bufferevent_write(bev, task->data, task->size);
+                } else {
+                    bufferevent_write(bev, "0\n", 2);
+                }
+                bufferevent_write(bev, "\n", 1);
+            }
+        }
+
+        task = task_get_next(task); 
+    }
+
+        /*
     while (task && !task_is_end(task)) {
         if (task->state == 1) { // working
-            /*
             printf("read task result\n");
             if ("read done") {
                 printf("remove task\n");
@@ -287,49 +362,55 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
                 continue;
             }
             // !!!not read done
-            */
             task = task->next;
             continue;
         }
-
-        // state != 1
-        
-        u_int16_t free_idx = get_free_worker();
-        if (free_idx == 0) {
-            break;
-        }
-        task->assign_worker_idx = free_idx;
-        printf("task assign_worker_idx = %d\n", free_idx);
-
-        struct bufferevent *bev = bufferevent_socket_new(g_base, g_worker_pool->workers[free_idx].pipefd[1], BEV_OPT_CLOSE_ON_FREE);
-        if (!bev) {
-            // !!! 任务失败
-            task = task->next;
-            continue;
-        }
-
-        bufferevent_setcb(bev, __task_readcb, NULL, NULL, task);
-        bufferevent_enable(bev, EV_READ);
-        bufferevent_enable(bev, EV_WRITE);
-
-	    bufferevent_write(bev, "he\0llo\nhahah\n", 13);
-        bufferevent_write(bev, WORKER_FRAME_MAGIC_HEAD, sizeof(WORKER_FRAME_MAGIC_HEAD));
-        bufferevent_write(bev, "\n", 1);
-
-        const char *cmd = "{\"fileurl\":\"10.0.200.20:5001/test.txt\"}";
-        bufferevent_write(bev, cmd, strlen(cmd));
-        bufferevent_write(bev, "\n", 1);
-        bufferevent_write(bev, "0\n", 2);
-        bufferevent_write(bev, "hellehello", 10);
-        printf("writed\n");
-        
-        task->state = 1;
-        task = task->next;
-        continue;
     }
+        */
 
     if (!evtimer_pending(g_eval_timer, NULL)) {
         event_del(g_eval_timer);
     }
     evtimer_add(g_eval_timer, &g_eval_timeval);
 }
+
+u_int16_t get_free_worker() {
+    printf("get_free_worker\n");
+    int i;
+    if (!g_worker_pool) return 0;
+    for (i = 1; i <= g_worker_pool->worker_num; i++) {
+        printf("i = %d\n", i);
+        worker_t *worker = &(g_worker_pool->workers[i]);
+        printf("worker->alive = %d, worker->busy = %d\n", worker->alive, worker->busy);
+        if (worker->alive && !worker->busy) {
+            int binding = 0;
+            printf("binding = %d\n", binding);
+            task_t *cur = task_get_head();
+            while (cur) {
+                printf("cur->token = %s\n", cur->token);
+                if (cur->bind_worker_idx == i) {
+                    printf("binding = 1 at %d\n", i);
+                    binding = 1;
+                    break;
+                }
+                cur = task_get_next(cur);
+            }
+            if (!binding) {
+                return i;
+            }
+        }
+    }
+    return 0;
+}
+
+    /*
+int bind_worker(task_t *task, u_int16_t idx) {
+    if (!task) {
+        return -1;
+    }
+    if (idx > g_worker_pool.worker_num) {
+        return -1;
+    }
+
+}
+    */

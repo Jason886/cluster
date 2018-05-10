@@ -2,8 +2,12 @@
 
 #include "liblog.h"
 
+#include <event.h>
 #include <event2/event.h>
+#include <event2/buffer.h>
+#include <event2/bufferevent.h>
 #include <event2/http.h>
+#include <event2/http_struct.h>
 
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -15,6 +19,7 @@
 extern void worker_run();
 
 worker_pool_t *g_worker_pool = NULL;
+extern struct event_base *g_base;
 
 static void __on_sigchild(int sig) {
     worker_pool_t *pool = g_worker_pool;
@@ -32,7 +37,12 @@ static void __on_sigchild(int sig) {
                 pool->workers[ix].alive = 0;
                 pool->workers[ix].busy = 0;
                 pool->workers[ix].used = 0;
+                if (pool->workers[ix].bev) {
+                    bufferevent_free(pool->workers[ix].bev);
+                    pool->workers[ix].bev = NULL;
+                }
                 close(pool->workers[ix].pipefd[1]);
+
 
                 if (evutil_socketpair(AF_UNIX, SOCK_STREAM, 0, pool->workers[ix].pipefd)) {
                     loge("evutil_socketpair failed\n");
@@ -56,6 +66,11 @@ static void __on_sigchild(int sig) {
                     // father
                     logi("fork worker#%u ok, pid = %d\n", ix, pool->workers[ix].pid);
                     close(pool->workers[ix].pipefd[0]);
+                    pool->workers[ix].bev = bufferevent_socket_new(g_base, pool->workers[ix].pipefd[1], 0);
+                    /* !!! 如果创建失败
+                    if() {
+                    }
+                    */
                     pool->workers[ix].alive = 1;
                     continue; 
                 } else {
@@ -133,6 +148,11 @@ int init_worker_pool(struct config *conf) {
             // father
             logi("fork worker#%u ok, pid = %d\n", ix, pool->workers[ix].pid);
             close(pool->workers[ix].pipefd[0]);
+            pool->workers[ix].bev = bufferevent_socket_new(g_base, pool->workers[ix].pipefd[1], 0);
+            /* !!! 如果创建失败
+            if() {
+            }
+            */
             pool->workers[ix].alive = 1;
             continue; 
         } else {
@@ -166,14 +186,3 @@ _E1:
     return -1;
 }
 
-u_int16_t get_free_worker() {
-    u_int16_t i;
-    if (!g_worker_pool) return 0;
-    for (i = 1; i <= g_worker_pool->worker_num; i++) {
-        worker_t *worker = &(g_worker_pool->workers[i]);
-        if (worker->alive && !worker->busy) {
-            return i;
-        }
-    }
-    return 0;
-}

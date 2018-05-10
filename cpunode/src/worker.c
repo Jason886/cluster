@@ -62,22 +62,24 @@ static void __reset_data() {
     _worker_pri.data_len = 0;
 }
 
-int __check_data() {
+int __check_data(char *errmsg, size_t size) {
     int ret = -1;
     cJSON *jcmd = NULL;
-    cJSON *jfileurl = NULL;
 
     if (!_worker_pri.cmd) {
+        snprintf(errmsg, size, "internal error, worker.c:__check_data() #1");
         goto _E;
     }
     jcmd = cJSON_Parse(_worker_pri.cmd);
     if (!jcmd) {
+        snprintf(errmsg, size, "internal error, worker.c:__check_data() #2");
         goto _E;
     }
 
-    jfileurl = cJSON_GetObjectItem(jcmd, "fileurl");
-    if (!jfileurl || jfileurl->type != cJSON_String || jfileurl->valuestring[0] == 0) {
-        if (_worker_pri.data == NULL || _worker_pri.data_len == 0) {
+    if (_worker_pri.data == NULL || _worker_pri.data_len == 0) {
+        cJSON *jfileurl = cJSON_GetObjectItem(jcmd, "fileurl");
+        if (!jfileurl || jfileurl->type != cJSON_String || strlen(jfileurl->valuestring) == 0) {
+            snprintf(errmsg, size, "internal error, worker.c:__check_data() #3");
             goto _E;
         }
     }
@@ -90,22 +92,31 @@ _E:
     return ret;
 }
 
-static void __do_calc() {
+static char *__do_calc() {
     printf("__do_calc data = %s\n", _worker_pri.data);
+    char *ret = malloc(512);
+    strcpy(ret, "{\"data\":\"hello\"}");
+    return ret;
 }
 
 static void __result_callback_cb(int result, char *data, unsigned int size) {
     printf("result = %d\n", result);
     printf("data = %s\n", data);
     printf("size = %d\n", size);
+
+    struct evbuffer *output = bufferevent_get_output(_worker_pri.bev);
+    evbuffer_add_printf(output, "what what what");;
+    _worker_pri.state = e_worker_state_idle;
 }
 
-static void __result_callback() {
+static void __result_callback(char *result) {
     printf("result_cb\n");
+
+    // write
 
     if (http_post (
                 _worker_pri.base, 
-                "http://192.168.2.9:5001/callback",
+                "http://10.0.200.20:5001/callback",
                 "this is result\n", 
                 strlen("this is result"), 
                 __result_callback_cb,
@@ -127,51 +138,39 @@ static void __download_cb(int result, char *data, unsigned int size) {
         _worker_pri.data = data;
         _worker_pri.data_len = size;
 
-        __do_calc();
-        __result_callback();
+        char *result = __do_calc();
+        __result_callback(result);
+        free(result);
     } else {
-        __result_callback();
+        __result_callback("download failed");
     }
 }
 
 static void __calc() {
     struct evbuffer *output = bufferevent_get_output(_worker_pri.bev);
-    printf("calc\n");
+    char errmsg[512];
 
-    if (__check_data()) {
+    if (__check_data(errmsg, sizeof(errmsg))) {
         printf("check_data error\n");
-        const char *errmsg = cpunode_errmsg(12345); // !!! errorno
-        evbuffer_add_printf(output, "{\"error\":{\"errno\":%d,\"info\":\"%s\"}}", errno, errmsg);
+        evbuffer_add_printf(output, "{\"token\": \"%s\", \"error\":{\"errno\":%d,\"info\":\"%s\"}}", "!!!", 10011, errmsg);
         _worker_pri.state = e_worker_state_idle;
         return;
     }
 
     if (_worker_pri.data && _worker_pri.data_len > 0) {
-        __do_calc();
-        __result_callback();
+        char *result = __do_calc();
+        __result_callback(result);
+        free(result);
         return;
     }
-
-
-    const char * url = "http://www.baidu.com/what?haha=kkk&uiuuu=oooo#heihei";
-    struct evhttp_uri * ev_uri = evhttp_uri_parse(url);
-    printf("ev_uri = %p\n", ev_uri);
-    printf("!!!! host = %s\n", evhttp_uri_get_host(ev_uri));
-    printf("!!!! path = %s\n", evhttp_uri_get_path(ev_uri));
-    printf("!!!! prot = %d\n", evhttp_uri_get_port(ev_uri));
-    printf("!!!! q = %s\n", evhttp_uri_get_query(ev_uri));
-    printf("!!! scheme = %s\n", evhttp_uri_get_scheme(ev_uri));
-    printf("!!! frag =%s\n", evhttp_uri_get_fragment(ev_uri));
-    printf("!!! user = %s\n", evhttp_uri_get_userinfo (ev_uri));
-
-    evhttp_uri_free(ev_uri);
+    printf("download start\n");
 
     if (http_download_start(
             _worker_pri.base,
-            "http://192.168.2.9:5001/test.txt",
+            "http://10.0.200.20:5001/test.txt",
             __download_cb, 
             NULL)) {
-        __result_callback();
+        __result_callback("download start failed");
         return;
     }
 }
@@ -191,20 +190,20 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
                 tmp_size = 0;
                 tmp = evbuffer_readln(input, &tmp_size, EVBUFFER_EOL_ANY);
                 if (tmp) {
-                    printf("diuqi?\n");
+                    //printf("diuqi?\n");
                     if (tmp_size >= magic_size && 
                         memcmp(tmp+tmp_size-magic_size, WORKER_FRAME_MAGIC_HEAD, magic_size) == 0) {
                         _worker_pri.state = e_worker_state_read_cmd;
                         __reset_data();
                     } else {
-                        printf("diuqi yes\n");
+                        //printf("diuqi yes\n");
                     }
                     free(tmp);
                     tmp = NULL;
                 }
                 break;
             case e_worker_state_read_cmd:
-                printf("read_cmd\n");
+                //printf("read_cmd\n");
                 tmp = evbuffer_readln(input, NULL, EVBUFFER_EOL_ANY);
                 if (tmp) {
                     _worker_pri.cmd = tmp;
@@ -213,7 +212,7 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
                 }
                 break;
             case e_worker_state_read_data_len:
-                printf("read_data_len\n");
+                //printf("read_data_len\n");
                 _worker_pri.data_len = 0; 
                 tmp = evbuffer_readln(input, NULL, EVBUFFER_EOL_ANY);
                 if (tmp) {
@@ -223,33 +222,30 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
                     tmp = NULL;
                     if (len < 0) len = 0;
                     _worker_pri.data_len = len;
+                    if (_worker_pri.data_len == 0) {
+                        _worker_pri.state = e_worker_state_calc;
+                        printf("__calc1\n");
+                        __calc();
+                        break;
+                    }
                     _worker_pri.state = e_worker_state_read_data;
                 }
                 break;
             case e_worker_state_read_data:
-                if (_worker_pri.data_len == 0) {
-                    _worker_pri.state = e_worker_state_calc;
-                    printf("entry1\n");
-                    __calc();
-                    //__download(_worker_pri.base, "10.0.200.20", 5005);
-                    break;
-                }
+                printf("read data\n");
 
                 if (evbuffer_get_length(input) >= _worker_pri.data_len) {
                     _worker_pri.data = malloc(_worker_pri.data_len);
                     memset(_worker_pri.data, 0, _worker_pri.data_len);
                     evbuffer_remove(input, _worker_pri.data, _worker_pri.data_len);
                     _worker_pri.state = e_worker_state_calc;
-                    printf("data = %s\n", _worker_pri.data);
-                    printf("entry2\n");
+                    //printf("data = %s\n", _worker_pri.data);
+                    printf("__calc2\n");
                     __calc();
-                    // 计算
                 }
                 break;
             case e_worker_state_calc:
-                printf("drain\n");
-                //if (evbuffer_get_length(input)) {
-                //}
+                printf("calcing, drain\n");
                 evbuffer_drain(input, evbuffer_get_length(input));
                 break;
             default:

@@ -4,57 +4,107 @@
 
 static task_t _head_guard = {0};
 
-task_t * task_new(const char *req_path, const char *token, const char *appkey, const char *secrekey, const char *fileurl, const char *callback) {
-    char *dup_req_path = strdup(req_path ? req_path : "");
-    char *dup_token = strdup(token ? token : "");
-    char *dup_appkey = strdup(appkey ? appkey : "");
-    char *dup_secretkey = strdup(secrekey ? secrekey : "");
-    char *dup_fileurl = strdup(fileurl ? fileurl : "");
-    char *dup_callback = strdup(callback ? callback : "");
-    if (
-            !dup_req_path ||
-            !dup_token ||
-            !dup_appkey ||
-            !dup_secretkey ||
-            !dup_fileurl ||
-            !dup_callback
-        ) {
-        if (dup_req_path) free(dup_req_path);
-        if (dup_token) free(dup_token);
-        if (dup_appkey) free(dup_appkey);
-        if (dup_secretkey) free(dup_secretkey);
-        if (dup_fileurl) free(dup_fileurl);
-        if (dup_callback) free(dup_callback);
+task_t * task_new( const char *req_path, struct cJSON *j_req, char *data, size_t size) {
+
+    if (!j_req) {
         return NULL;
     }
 
-    task_t * task = malloc(sizeof(*task));
-    if (task) {
-        memset(task, 0, sizeof(*task));
-        task->req_path = dup_req_path;
-        task->token = dup_token;
-        task->appkey = dup_appkey;
-        task->secrekey = dup_secretkey;
-        task->fileurl = dup_fileurl;
-        task->callback = dup_callback;
+    struct cJSON * j_token = cJSON_GetObjectItem(j_req, "token");
+    char *token = NULL;
+    if (j_token && j_token->type == cJSON_String) {
+        token = j_token->valuestring;
     }
+
+    struct cJSON *j_appkey = cJSON_GetObjectItem(j_req, "appkey");
+    char *appkey = NULL;
+    if (j_appkey && j_appkey->type == cJSON_String) {
+        appkey = j_appkey->valuestring;
+    }
+
+    struct cJSON *j_secretkey = cJSON_GetObjectItem(j_req, "secretkey");
+    char *secretkey = NULL;
+    if (j_secretkey && j_secretkey->type == cJSON_String) {
+        secretkey = j_secretkey->valuestring;
+    }
+
+    struct cJSON *j_callback = cJSON_GetObjectItem(j_req, "callback");
+    char *callback = NULL;
+    if (j_callback && j_callback->type == cJSON_String) {
+        callback = j_callback->valuestring;
+    }
+
+    struct cJSON *j_fileurl = cJSON_GetObjectItem(j_req, "fileurl");
+    char *fileurl = NULL;
+    if (j_fileurl && j_fileurl->type == cJSON_String) {
+        fileurl = j_fileurl->valuestring;
+    }
+ 
+
+    char *dup_req_path = NULL;
+    if (req_path) {
+        dup_req_path = strdup(req_path);
+        if (!dup_req_path) {
+            return NULL;
+        }
+    }
+
+    char *dup_data = NULL;
+    if (data && size > 0) {
+        dup_data = malloc(size);
+        if (!dup_data) {
+            if (dup_req_path) free(dup_req_path);
+            return NULL;
+        }
+        memcpy(dup_data, data, size);
+    }
+
+    task_t * task = malloc(sizeof(*task));
+    if (!task) {
+        if (dup_req_path) free(dup_req_path);
+        if (dup_data) free(dup_data);
+        return NULL;
+    }
+    memset(task, 0, sizeof(*task));
+
+    //int compress;
+
+    task->req_path = dup_req_path;
+    task->is_async = 0;
+    printf("!!!!! callback = %s\n", callback);
+    if (callback && strlen(callback) > 0) {
+        task->is_async = 1;
+    }
+
+    task->j_req = j_req;
+    task->token = token;
+    task->appkey = appkey;
+    task->secrekey = secretkey;
+    task->callback = callback;
+    task->fileurl = fileurl;
+    task->data = dup_data;
+    task->size = size;
+
+    task->binded = 0;
+    task->bind_worker_idx = 0;
     return task;
 }
 
 void task_free(task_t *task) {
     if (task) {
-        free(task->req_path);
-        free(task->token);
-        free(task->appkey);
-        free(task->secrekey);
-        free(task->fileurl);
-        free(task->callback);
+        if (task->req_path) free(task->req_path);
+        task->req_path = NULL;
+        if (task->data) free(task->data);
+        task->data = NULL;
+        if (task->j_req) cJSON_Delete(task->j_req);
+        task->j_req = NULL;
         free(task);
     }
 }
 
 void task_add_tail(task_t *task) {
     if (!task) return;
+
     if ((&_head_guard)->next == NULL) {
         (&_head_guard)->next = &_head_guard;
         (&_head_guard)->prev = &_head_guard;
@@ -73,13 +123,33 @@ task_t *task_get_head() {
     return NULL;
 }
 
+task_t *task_get_next(task_t *task) {
+    if (!task) {
+        return NULL;
+    }
+    if (task->next == &_head_guard) {
+        return NULL;
+    }
+    return task->next;
+}
+
+void task_remove(task_t *task) {
+    if (task) {
+        task->prev->next = task->next;
+        task->next->prev = task->prev;
+    }
+}
+
+/*
 int task_is_end(task_t *task) {
     if (task && task == &_head_guard) {
         return 1;
     }
     return 0;
 }
+*/
 
+/*
 task_t *task_find_first(const char *token) {
     task_t *cur = (&_head_guard)->next;
     while (cur != (&_head_guard)) {
@@ -89,10 +159,4 @@ task_t *task_find_first(const char *token) {
         cur = cur->next;
     }
 }
-
-void task_remove(task_t *task) {
-    if (task) {
-        task->prev->next = task->next;
-        task->next->prev = task->prev;
-    }
-}
+*/
