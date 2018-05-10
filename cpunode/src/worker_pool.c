@@ -43,6 +43,8 @@ static void __on_sigchild(int sig) {
                 }
                 close(pool->workers[ix].pipefd[1]);
 
+                // !!! 将task列表中该项的绑定删除 // 并取消bev的监听
+
 
                 if (evutil_socketpair(AF_UNIX, SOCK_STREAM, 0, pool->workers[ix].pipefd)) {
                     loge("evutil_socketpair failed\n");

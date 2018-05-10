@@ -313,12 +313,12 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
                 task->bind_worker_idx = free_idx;
                 logi("bind task %s to worker#%d\n", task->token, free_idx);
                 
-                struct bufferevent *bev = g_worker_pool->workers[free_idx].bev;
-                //struct bufferevent *bev = bufferevent_socket_new(g_base, g_worker_pool->workers[free_idx].pipefd[1], 0);
-                //if (!bev) {
-                //    task = task_get_next(task);
-                //    continue;
-                //}
+                //struct bufferevent *bev = g_worker_pool->workers[free_idx].bev;
+                struct bufferevent *bev = bufferevent_socket_new(g_base, g_worker_pool->workers[free_idx].pipefd[1], 0);
+                if (!bev) {
+                    task = task_get_next(task);
+                    continue;
+                }
                 // 清空管道的input
 
                 bufferevent_setcb(bev, __task_readcb, NULL, NULL, task);
