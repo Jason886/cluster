@@ -105,7 +105,17 @@ static void __result_callback_cb(int result, char *data, unsigned int size) {
     printf("size = %d\n", size);
 
     struct evbuffer *output = bufferevent_get_output(_worker_pri.bev);
-    evbuffer_add_printf(output, "what what what");;
+    //evbuffer_add_printf(output, "what what what");;
+
+
+    // 向管道写
+    evbuffer_add(output, "\n", 1);
+    evbuffer_add(output, WORKER_FRAME_MAGIC_HEAD, sizeof(WORKER_FRAME_MAGIC_HEAD));
+    evbuffer_add(output, "\n", 1);
+    evbuffer_add(output, "10\n", 3);
+    evbuffer_add(output, "hellohello", 10);
+    evbuffer_add(output, "0\n", 2);
+
     _worker_pri.state = e_worker_state_idle;
 }
 

@@ -37,7 +37,7 @@ int cpunode_httpd_init(struct config *conf, int port) {
 
     for (ix = 0; ix < ROUTER_NUM; ++ix) {
         if (__router[ix].path && __router[ix].path[0] && __router[ix].cb) {
-            printf("__router[ix].path = %s\n", __router[ix].path);
+            logd("__router[ix].path = %s\n", __router[ix].path);
             evhttp_set_cb(http, __router[ix].path, __router[ix].cb, NULL);
         }
     }

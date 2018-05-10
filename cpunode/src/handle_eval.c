@@ -41,17 +41,46 @@ typedef struct eval_req_params {
     struct evbuffer *ev_file;
 } eval_req_params_t;
 
-static void __dispatch_error_1(struct evhttp_request *req, int errno, const char *errmsg) {
+static void __dispatch_error_1(struct evhttp_request *req, int errno, const char *errmsg, struct cJSON * j_req, char *token) {
     if (req) {
         if (errmsg == NULL) {
             errmsg = cpunode_errmsg(errno);
         } 
+
         struct evbuffer *evb = evbuffer_new();
-        evbuffer_add_printf(evb, "{\"error\":{\"errno\":%d,\"info\":\"%s\"}}", errno, errmsg);
-        // !!! loge
+        if (j_req) {
+            char * req_text = cJSON_PrintUnformatted(j_req);
+            if (token) {
+                evbuffer_add_printf(evb, "{\"token\":\"%s\", \"error\":{\"errno\":%d,\"info\":\"%s\"}, \"request\":%s}", token, errno, errmsg, req_text?req_text:"null");
+            } else {
+                evbuffer_add_printf(evb, "{\"error\":{\"errno\":%d,\"info\":\"%s\"}, \"request\":%s}", errno, errmsg, req_text?req_text:"null");
+            }
+            free(req_text);
+        }
+        else {
+            if (token) {
+                evbuffer_add_printf(evb, "{\"token\":\"%s\",\"error\":{\"errno\":%d,\"info\":\"%s\"}}", token, errno, errmsg);
+            } else {
+                evbuffer_add_printf(evb, "{\"error\":{\"errno\":%d,\"info\":\"%s\"}}", errno, errmsg);
+            }
+        }
         evhttp_send_reply(req, 200, "OK", evb);
+        loge("response error: %*.s\n", EVBUFFER_DATA(evb), EVBUFFER_LENGTH(evb));
         evbuffer_free(evb);
     }
+}
+
+static void __dispatch_result(struct evhttp_request *req, struct cJSON *j_req, char *token, char *result) {
+    struct evbuffer *evb = evbuffer_new();
+    char *req_text = cJSON_PrintUnformatted(j_req);
+    if (result) {
+        evbuffer_add_printf(evb, "{\"token\":\"%s\", \"data\":%s, \"request\":%s}", token?token:"null", result, req_text?req_text:"null");
+    } else {
+        evbuffer_add_printf(evb, "{\"token\":\"%s\", \"request\":%s}", token?token:"null", req_text?req_text:"null");
+    }
+    evhttp_send_reply(req, 200, "OK", evb);
+    if (req_text) free(req_text);
+    evbuffer_free(evb);
 }
 
 static int __fill_req_params(struct evhttp_request *req, const char *boundary, eval_req_params_t * req_params) {
@@ -153,44 +182,16 @@ static void __handle(struct evhttp_request *req, const char *boundary) {
 
     errno = __fill_req_params(req, boundary, &req_params);
     if (errno) {
+        __dispatch_error_1(req, errno, NULL, NULL, NULL);
         goto _E;
     }
 
-    if (!req_params._has_token || strlen(req_params.token) == 0) {
-        __dispatch_error_1(req, 10003, NULL);
-        goto _E;
-    }
-
-    if (!req_params._has_appkey || strlen(req_params.appkey) == 0) {
-        __dispatch_error_1(req, 10004, NULL);
-        goto _E;
-    }
-    
-    if (!req_params._has_secretkey || strlen(req_params.secretkey) == 0) {
-        __dispatch_error_1(req, 10006, NULL);
-        goto _E;
-    }
-
-    if (!req_params.ev_file || evbuffer_get_length(req_params.ev_file) == 0) {
-        if (!req_params._has_fileurl || strlen(req_params.fileurl) == 0) {
-            __dispatch_error_1(req, 10008, NULL);
-            goto _E;
-        }
-    }
-
-    // !!! auth 10007
-
-    if (req_params.ev_file) {
-        data = EVBUFFER_DATA(req_params.ev_file);
-        size = EVBUFFER_LENGTH(req_params.ev_file);
-    }
-
-    // create j_req
     j_req = cJSON_CreateObject();
     if (!j_req) {
-        __dispatch_error_1(req, 10009, "internal error, handle_eval create j_req");
+        __dispatch_error_1(req, 10009, "internal error, handle_eval create j_req", NULL, NULL);
         goto _E;
     }
+
     if (req_params._has_token) {
         cJSON_AddStringToObject(j_req, "token", req_params.token);
     }
@@ -210,9 +211,38 @@ static void __handle(struct evhttp_request *req, const char *boundary) {
         cJSON_AddNumberToObject(j_req, "compress", req_params.compress);
     }
 
+    if (!req_params._has_token || strlen(req_params.token) == 0) {
+        __dispatch_error_1(req, 10003, NULL, j_req, NULL);
+        goto _E;
+    }
+
+    if (!req_params._has_appkey || strlen(req_params.appkey) == 0) {
+        __dispatch_error_1(req, 10004, NULL, j_req, req_params.token);
+        goto _E;
+    }
+    
+    if (!req_params._has_secretkey || strlen(req_params.secretkey) == 0) {
+        __dispatch_error_1(req, 10006, NULL, j_req, req_params.token);
+        goto _E;
+    }
+
+    if (!req_params.ev_file || evbuffer_get_length(req_params.ev_file) == 0) {
+        if (!req_params._has_fileurl || strlen(req_params.fileurl) == 0) {
+            __dispatch_error_1(req, 10008, NULL, j_req, req_params.token);
+            goto _E;
+        }
+    }
+
+    // !!! auth 10007
+
+    if (req_params.ev_file) {
+        data = EVBUFFER_DATA(req_params.ev_file);
+        size = EVBUFFER_LENGTH(req_params.ev_file);
+    }
+
     task = task_new(uri, j_req, data, size);
     if (!task) {
-        __dispatch_error_1(req, 10009, "internal error, task_new failed");
+        __dispatch_error_1(req, 10009, "internal error, task_new failed", j_req, req_params.token);
         goto _E;
     }
 
@@ -223,24 +253,18 @@ static void __handle(struct evhttp_request *req, const char *boundary) {
 
     if (task->is_async) {
         task_add_tail(task);
-        char *ori_req = cJSON_PrintUnformatted(j_req);
-        struct evbuffer *evb = evbuffer_new();
-        evbuffer_add_printf(evb, "{\"token\":\"%s\", \"request\":%s}", req_params.token, ori_req?ori_req:"null");
-        evhttp_send_reply(req, 200, "OK", evb);
-        if (ori_req) free(ori_req);
-        evbuffer_free(evb);
+        task_list_dump();
+        __dispatch_result(req, j_req, req_params.token, NULL);
     } else {
-        __dispatch_error_1(req, 10010, NULL);
+        __dispatch_error_1(req, 10010, NULL,  j_req, req_params.token);
         goto _E;
     }
     
     return;
 
 _E:
-    if (j_req) {
-        cJSON_Delete(j_req);
-        j_req = NULL;
-    }
+    if (task) task_free(task); task = NULL;
+    if (j_req) cJSON_Delete(j_req); j_req = NULL;
     if (req_params.ev_file) {
         evbuffer_free(req_params.ev_file);
         req_params.ev_file = 0;
@@ -263,7 +287,7 @@ void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
 
     if (!((method == EVHTTP_REQ_GET) || (method == EVHTTP_REQ_POST))) {
         loge("un-supported http method: %d\n", method);
-        __dispatch_error_1(req, 10001, NULL);
+        __dispatch_error_1(req, 10001, NULL, NULL, NULL);
         return;
     }
 
@@ -274,7 +298,7 @@ void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
         return;
     } else {
         loge("un-supported content type: %s\n", content_type);
-        __dispatch_error_1(req, 10002, NULL);
+        __dispatch_error_1(req, 10002, NULL, NULL, NULL);
         return;
     }
 }
@@ -282,29 +306,100 @@ void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
 static void __task_readcb(struct bufferevent *bev, void *user_data) {
     task_t *task = user_data;
     struct evbuffer *input = bufferevent_get_input(bev);
-    while (evbuffer_get_length(input) > 0) {
-        int len = evbuffer_get_length(input);
-        char *data = malloc(len+1);
-        memset(data, 0, len+1);
-        evbuffer_remove(input, data, len);
-        printf("read result %s\n", data);
-        free(data);
+    size_t size = evbuffer_get_length(input);
+    char *tmp;
+    size_t tmp_size = 0;
+    size_t magic_size = sizeof(WORKER_FRAME_MAGIC_HEAD);
+
+    printf("!!!!! 111\n");
+
+    if (!task) {
+        loge("__task_readcb got null task\n");
+        if (size > 0) {
+            evbuffer_drain(input, size);
+        }
+        return;
     }
-    //bufferevent_free(bev);
+    printf("!!!!! 222\n");
+
+    while(evbuffer_get_length(input) > 0) {
+        switch (task->recv_state) {
+            case 0:
+                printf("!!!!! 333\n");
+                tmp_size = 0;
+                tmp = evbuffer_readln(input, &tmp_size, EVBUFFER_EOL_ANY);
+                if (tmp) {
+                    if (tmp_size >= magic_size && 
+                        memcmp(tmp+tmp_size-magic_size, WORKER_FRAME_MAGIC_HEAD, magic_size) == 0) {
+                        task->recv_state = 1;
+                        if (task->result) free(task->result); task->result = NULL;
+                        task->result_size = 0;
+                        task->result_recved = 0;
+                    } else {
+                        //printf("diuqi yes\n");
+                    }
+                    free(tmp);
+                    tmp = NULL;
+                }
+                break;
+            case 1:
+                printf("!!!!! 444\n");
+                tmp_size = 0;
+                task->result_size = 0;
+                tmp = evbuffer_readln(input, NULL, EVBUFFER_EOL_ANY);
+                if (tmp) {
+                    int len = atoi(tmp);
+                    free(tmp);
+                    tmp = NULL;
+                    if (len < 0) len = 0;
+                    task->result_size = len;
+                    if (task->result_size == 0) {
+                        task->recv_state = -1;
+                        goto __RECV_OK;
+                    }
+                    task->recv_state = 2;
+                }
+                break;
+            case 2:
+                printf("!!!!! 555\n");
+                if (evbuffer_get_length(input) >= task->result_size) {
+                    task->result = malloc(task->result_size +1);
+                    memset(task->result, 0, task->result_size +1);
+                    task->result_recved = evbuffer_remove(input, task->result, task->result_size);
+                    task->recv_state = -1;
+                    goto __RECV_OK;
+                }
+                break;
+            case -1:
+                logd("recv done, drain\n");
+                evbuffer_drain(input, evbuffer_get_length(input));
+                break;
+            default:
+                break;
+        }
+    }
+
+__RECV_OK:
+    printf("!!!!! 666\n");
+
+    if (task->is_async) {
+        printf("read result %s\n", task->result);
+        task_remove(task);
+    } else {
+        // http响应
+    }
+
     task->binded = 0;
     task->bind_worker_idx = 0;
-
-    task_remove(task);
+    task_free(task);
 }
 
 void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
-
-    //printf("cb_func called times so far.\n");
+    logd("master timer cb\n");
 
     task_t * task = task_get_head();
     while (task) {
-                // 这一段设置为不可中断
-                
+        // !!! 这一段设置为不可中断
         if (!task->binded) {
             int free_idx = get_free_worker();
             if (free_idx > 0) {
@@ -313,13 +408,13 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
                 task->bind_worker_idx = free_idx;
                 logi("bind task %s to worker#%d\n", task->token, free_idx);
                 
-                //struct bufferevent *bev = g_worker_pool->workers[free_idx].bev;
-                struct bufferevent *bev = bufferevent_socket_new(g_base, g_worker_pool->workers[free_idx].pipefd[1], 0);
-                if (!bev) {
-                    task = task_get_next(task);
-                    continue;
-                }
-                // 清空管道的input
+                struct bufferevent *bev = g_worker_pool->workers[free_idx].bev;
+                //struct bufferevent *bev = bufferevent_socket_new(g_base, g_worker_pool->workers[free_idx].pipefd[1], 0);
+                //if (!bev) {
+                //    task = task_get_next(task);
+                //    continue;
+                //}
+                // !!! 清空管道的input
 
                 bufferevent_setcb(bev, __task_readcb, NULL, NULL, task);
                 bufferevent_enable(bev, EV_READ);
@@ -348,25 +443,6 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
 
         task = task_get_next(task); 
     }
-
-        /*
-    while (task && !task_is_end(task)) {
-        if (task->state == 1) { // working
-            printf("read task result\n");
-            if ("read done") {
-                printf("remove task\n");
-                task_t *rm = task;
-                task = task->next;
-                task_remove(rm);
-                task_free(rm);
-                continue;
-            }
-            // !!!not read done
-            task = task->next;
-            continue;
-        }
-    }
-        */
 
     if (!evtimer_pending(g_eval_timer, NULL)) {
         event_del(g_eval_timer);

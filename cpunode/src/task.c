@@ -1,4 +1,5 @@
 #include "task.h"
+#include "liblog.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -71,7 +72,6 @@ task_t * task_new( const char *req_path, struct cJSON *j_req, char *data, size_t
 
     task->req_path = dup_req_path;
     task->is_async = 0;
-    printf("!!!!! callback = %s\n", callback);
     if (callback && strlen(callback) > 0) {
         task->is_async = 1;
     }
@@ -87,33 +87,37 @@ task_t * task_new( const char *req_path, struct cJSON *j_req, char *data, size_t
 
     task->binded = 0;
     task->bind_worker_idx = 0;
+
+    task->result = NULL;
+    task->result_size = 0;
+    task->result_recved = 0;
+    task->recv_state = 0;
+
     return task;
 }
 
 void task_free(task_t *task) {
     if (task) {
-        if (task->req_path) free(task->req_path);
-        task->req_path = NULL;
-        if (task->data) free(task->data);
-        task->data = NULL;
-        if (task->j_req) cJSON_Delete(task->j_req);
-        task->j_req = NULL;
+        if (task->req_path) free(task->req_path); task->req_path = NULL;
+        if (task->j_req) cJSON_Delete(task->j_req); task->j_req = NULL;
+        if (task->data) free(task->data); task->data = NULL;
+        if (task->result) free(task->result); task->result = NULL;
         free(task);
     }
 }
 
 void task_add_tail(task_t *task) {
-    if (!task) return;
+    if (task) {
+        if ((&_head_guard)->next == NULL) {
+            (&_head_guard)->next = &_head_guard;
+            (&_head_guard)->prev = &_head_guard;
+        }
 
-    if ((&_head_guard)->next == NULL) {
-        (&_head_guard)->next = &_head_guard;
-        (&_head_guard)->prev = &_head_guard;
+        task->next = &_head_guard;
+        task->prev = (&_head_guard)->prev;
+        (&_head_guard)->prev->next = task;
+        (&_head_guard)->prev = task;
     }
-
-    task->next = &_head_guard;
-    task->prev = (&_head_guard)->prev;
-    (&_head_guard)->prev->next = task;
-    (&_head_guard)->prev = task;
 }
 
 task_t *task_get_head() {
@@ -124,13 +128,12 @@ task_t *task_get_head() {
 }
 
 task_t *task_get_next(task_t *task) {
-    if (!task) {
-        return NULL;
+    if (task) {
+        if (task->next != &_head_guard) {
+            return task->next;    
+        }
     }
-    if (task->next == &_head_guard) {
-        return NULL;
-    }
-    return task->next;
+    return NULL;
 }
 
 void task_remove(task_t *task) {
@@ -140,23 +143,16 @@ void task_remove(task_t *task) {
     }
 }
 
-/*
-int task_is_end(task_t *task) {
-    if (task && task == &_head_guard) {
-        return 1;
+void task_list_dump() {
+    static char tmp[81920] = {0};
+    int i = 0;
+    task_t *cur = task_get_head();
+    snprintf(tmp, sizeof(tmp), "dump task list:\n");
+    while (cur) {
+        snprintf(tmp, sizeof(tmp), "\t[%d] token:%s callback:%s fileurl:%s binded:%d bind_worker_idx:%d \n", i, cur->token, cur->callback, cur->fileurl, cur->binded, cur->bind_worker_idx);
+        cur = task_get_next(cur);
+        i++;
     }
-    return 0;
+    snprintf(tmp, sizeof(tmp), "\n");
+    logd(tmp);
 }
-*/
-
-/*
-task_t *task_find_first(const char *token) {
-    task_t *cur = (&_head_guard)->next;
-    while (cur != (&_head_guard)) {
-        if (strcmp(cur->token, token) == 0) {
-            return cur;
-        }
-        cur = cur->next;
-    }
-}
-*/
