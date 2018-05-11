@@ -94,9 +94,37 @@ _E:
 
 static char *__do_calc() {
     printf("__do_calc data = %s\n", _worker_pri.data);
-    char *ret = malloc(512);
-    strcpy(ret, "{\"data\":\"hello\"}");
-    return ret;
+
+    wtk_vipkid_engine_t *engine = wtk_vipkid_engine_new(g_vipkid_engine_cfg);
+    if (!engine) {
+        // error!!!
+        return "error";
+    }
+
+    if (wtk_vipkid_engine_start(engine)) {
+        // !!! error
+        return "start error";
+    }
+
+    char buffer[4096];
+    size_t pos = 44;
+    while (pos + 4096 < _worker_pri.data_len) {
+        wtk_vipkid_engine_feed_wav2(engine, _worker_pri.data + pos, 4096, 0);
+        pos += 4096;
+    }
+    wtk_vipkid_engine_feed_wav2(engine, _worker_pri.data + pos, _worker_pri.data_len - pos, 1);
+    
+    char * engine_res = engine->res;
+    if (!engine_res || strlen(engine_res) == 0) {
+        // !!! error
+        return "error";
+    }
+
+    char *result = strdup(engine_res);
+
+    wtk_vipkid_engine_reset(engine);
+    wtk_vipkid_engine_delete(engine);
+    return result;
 }
 
 static void __result_callback_cb(int result, char *data, unsigned int size) {
@@ -126,7 +154,7 @@ static void __result_callback(char *result) {
 
     if (http_post (
                 g_worker_base, 
-                "http://192.168.2.9:5001/callback",
+                "http://10.0.200.20:5001/callback",
                 "this is result\n", 
                 strlen("this is result"), 
                 __result_callback_cb,
@@ -179,7 +207,7 @@ static void __calc() {
 
     if (http_download_start(
             g_worker_base, 
-            "http://192.168.2.9:5001/test.txt",
+            "http://10.0.200.20:5001/test.wav",
             __download_cb, 
             NULL)) {
         __result_callback("download start failed");
