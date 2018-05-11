@@ -1,85 +1,77 @@
-#include "worker_pool.h"
-#include "wtk_vipkid_engine.h"
 #include "http_download.h"
+#include "worker_pool.h"
+#include "worker.h"
 #include "err_inf.h"
+
+#include "wtk_vipkid_engine.h"
+#include "liblog.h"
 #include "cJSON.h"
 
-#include "liblog.h"
-#include "libconfig.h"
-#include "libmacro.h"
-
-#include <event.h>
-#include <event2/event.h>
-#include <event2/http.h>
-#include <event2/event.h>
-#include <event2/buffer.h>
-#include <event2/bufferevent.h>
-#include <event2/http.h>
-#include <event2/http_struct.h>
-
-#include <stdlib.h>
 #include <string.h>
-#include <signal.h>
-#include <unistd.h>
-#include <errno.h>
-#include <fcntl.h>
 
 extern wtk_vipkid_engine_cfg_t *g_vipkid_engine_cfg;
-extern struct event_base *g_worker_base;
+
+unsigned int g_worker_id = 0;  // 工作进程编号, 从1开始, 0代表主进程
+struct event_base *g_worker_base = NULL;
+struct evconnlistener * g_worker_listener = NULL;
 
 typedef enum {
     e_worker_state_idle = 0,    // 空闲
-    e_worker_state_read_cmd = 1,
-    e_worker_state_read_data_len = 2,
-    e_worker_state_read_data = 3, // 从管道读
-    e_worker_state_down_data = 4, // 从网络下载数据
-    e_worker_state_calc = 5     // 计算
+    e_worker_state_read_cmd_len = 1,
+    e_worker_state_read_cmd_content = 2,
+    e_worker_state_read_data_len = 3,
+    e_worker_state_read_data_content = 4,
+    e_worker_state_calc = 5,     // 计算
+    e_worker_state_read_data = 6, // 从管道读
+    e_worker_state_read_cmd = 7,
 } e_worker_state;
 
-typedef struct worker_private {
-    worker_t *worker;
+typedef struct worker_fsm {
     e_worker_state state;
-    //struct event_base *base;
     struct bufferevent *bev; 
 
     char *cmd;
     size_t data_len;
     char *data;
-} worker_private_t;
+    char *result;
+} worker_fsm_t;
 
-static worker_private_t _worker_pri = {0}; 
+static worker_fsm_t __fsm = {0}; 
 
-
-static void __reset_data() {
-    if (_worker_pri.cmd) {
-        free(_worker_pri.cmd);
-        _worker_pri.cmd = NULL;
+static void __reset_fsm_data() {
+    if (__fsm.cmd) {
+        free(__fsm.cmd);
+        __fsm.cmd = NULL;
     } 
-    if (_worker_pri.data) {
-        free(_worker_pri.data);
-        _worker_pri.data = NULL;
+    if (__fsm.data) {
+        free(__fsm.data);
+        __fsm.data = NULL;
     }
-    _worker_pri.data_len = 0;
+    if (__fsm.result) {
+        free(__fsm.result);
+        __fsm.result = NULL;
+    }
+    __fsm.data_len = 0;
 }
 
-int __check_data(char *errmsg, size_t size) {
+int __check_cmd_and_data(char *errmsg, size_t size) {
     int ret = -1;
     cJSON *jcmd = NULL;
 
-    if (!_worker_pri.cmd) {
-        snprintf(errmsg, size, "internal error, worker.c:__check_data() #1");
+    if (!__fsm.cmd) {
+        snprintf(errmsg, size, "internal error, worker.c:__check_cmd_and_data() #1");
         goto _E;
     }
-    jcmd = cJSON_Parse(_worker_pri.cmd);
+    jcmd = cJSON_Parse(__fsm.cmd);
     if (!jcmd) {
-        snprintf(errmsg, size, "internal error, worker.c:__check_data() #2");
+        snprintf(errmsg, size, "internal error, worker.c:__check_cmd_and_data() #2");
         goto _E;
     }
 
-    if (_worker_pri.data == NULL || _worker_pri.data_len == 0) {
+    if (__fsm.data == NULL || __fsm.data_len == 0) {
         cJSON *jfileurl = cJSON_GetObjectItem(jcmd, "fileurl");
         if (!jfileurl || jfileurl->type != cJSON_String || strlen(jfileurl->valuestring) == 0) {
-            snprintf(errmsg, size, "internal error, worker.c:__check_data() #3");
+            snprintf(errmsg, size, "internal error, worker.c:__check_cmd_and_data() #3");
             goto _E;
         }
     }
@@ -93,7 +85,7 @@ _E:
 }
 
 static char *__do_calc() {
-    printf("__do_calc data = %s\n", _worker_pri.data);
+    printf("__do_calc data = %s\n", __fsm.data);
 
     wtk_vipkid_engine_t *engine = wtk_vipkid_engine_new(g_vipkid_engine_cfg);
     if (!engine) {
@@ -108,11 +100,11 @@ static char *__do_calc() {
 
     char buffer[4096];
     size_t pos = 44;
-    while (pos + 4096 < _worker_pri.data_len) {
-        wtk_vipkid_engine_feed_wav2(engine, _worker_pri.data + pos, 4096, 0);
+    while (pos + 4096 < __fsm.data_len) {
+        wtk_vipkid_engine_feed_wav2(engine, __fsm.data + pos, 4096, 0);
         pos += 4096;
     }
-    wtk_vipkid_engine_feed_wav2(engine, _worker_pri.data + pos, _worker_pri.data_len - pos, 1);
+    wtk_vipkid_engine_feed_wav2(engine, __fsm.data + pos, __fsm.data_len - pos, 1);
     
     char * engine_res = engine->res;
     if (!engine_res || strlen(engine_res) == 0) {
@@ -132,7 +124,7 @@ static void __result_callback_cb(int result, char *data, unsigned int size) {
     printf("data = %s\n", data);
     printf("size = %d\n", size);
 
-    struct evbuffer *output = bufferevent_get_output(_worker_pri.bev);
+    struct evbuffer *output = bufferevent_get_output(__fsm.bev);
     //evbuffer_add_printf(output, "what what what");;
 
 
@@ -144,7 +136,7 @@ static void __result_callback_cb(int result, char *data, unsigned int size) {
     evbuffer_add(output, "hellohello", 10);
     evbuffer_add(output, "0\n", 2);
 
-    _worker_pri.state = e_worker_state_idle;
+    __fsm.state = e_worker_state_idle;
 }
 
 static void __result_callback(char *result) {
@@ -169,12 +161,12 @@ static void __result_callback(char *result) {
 static void __download_cb(int result, char *data, unsigned int size) {
     printf("download cb\n");
     if (result == 0 && data && size > 0) {
-        if (_worker_pri.data) {
-            free(_worker_pri.data);
-            _worker_pri.data = NULL;
+        if (__fsm.data) {
+            free(__fsm.data);
+            __fsm.data = NULL;
         }
-        _worker_pri.data = data;
-        _worker_pri.data_len = size;
+        __fsm.data = data;
+        __fsm.data_len = size;
 
         char *result = __do_calc();
         __result_callback(result);
@@ -185,19 +177,19 @@ static void __download_cb(int result, char *data, unsigned int size) {
 }
 
 static void __calc() {
-    struct evbuffer *output = bufferevent_get_output(_worker_pri.bev);
+    struct evbuffer *output = bufferevent_get_output(__fsm.bev);
     char errmsg[512];
-    printf("__check_data\n");
+    printf("__check_cmd_and_data\n");
 
-    if (__check_data(errmsg, sizeof(errmsg))) {
+    if (__check_cmd_and_data(errmsg, sizeof(errmsg))) {
         printf("check_data error\n");
         evbuffer_add_printf(output, "{\"token\": \"%s\", \"error\":{\"errno\":%d,\"info\":\"%s\"}}", "!!!", 10011, errmsg);
-        _worker_pri.state = e_worker_state_idle;
+        __fsm.state = e_worker_state_idle;
         return;
     }
     printf("after check_data\n");
 
-    if (_worker_pri.data && _worker_pri.data_len > 0) {
+    if (__fsm.data && __fsm.data_len > 0) {
         char *result = __do_calc();
         __result_callback(result);
         free(result);
@@ -238,7 +230,7 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
     size_t magic_size = sizeof(WORKER_FRAME_MAGIC_HEAD);
 
     while (evbuffer_get_length(input) > 0) {
-        switch(_worker_pri.state) {
+        switch(__fsm.state) {
             case e_worker_state_idle:
                 tmp_size = 0;
                 tmp = evbuffer_readln(input, &tmp_size, EVBUFFER_EOL_ANY);
@@ -246,8 +238,8 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
                     //printf("diuqi?\n");
                     if (tmp_size >= magic_size && 
                         memcmp(tmp+tmp_size-magic_size, WORKER_FRAME_MAGIC_HEAD, magic_size) == 0) {
-                        _worker_pri.state = e_worker_state_read_cmd;
-                        __reset_data();
+                        __fsm.state = e_worker_state_read_cmd;
+                        __reset_fsm_data();
                     } else {
                         //printf("diuqi yes\n");
                     }
@@ -259,14 +251,14 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
                 //printf("read_cmd\n");
                 tmp = evbuffer_readln(input, NULL, EVBUFFER_EOL_ANY);
                 if (tmp) {
-                    _worker_pri.cmd = tmp;
-                    printf("cmd = %s\n", _worker_pri.cmd);
-                    _worker_pri.state = e_worker_state_read_data_len;
+                    __fsm.cmd = tmp;
+                    printf("cmd = %s\n", __fsm.cmd);
+                    __fsm.state = e_worker_state_read_data_len;
                 }
                 break;
             case e_worker_state_read_data_len:
                 //printf("read_data_len\n");
-                _worker_pri.data_len = 0; 
+                __fsm.data_len = 0; 
                 tmp = evbuffer_readln(input, NULL, EVBUFFER_EOL_ANY);
                 if (tmp) {
                     printf("data_len = %s\n", tmp);
@@ -274,25 +266,25 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
                     free(tmp);
                     tmp = NULL;
                     if (len < 0) len = 0;
-                    _worker_pri.data_len = len;
-                    if (_worker_pri.data_len == 0) {
-                        _worker_pri.state = e_worker_state_calc;
+                    __fsm.data_len = len;
+                    if (__fsm.data_len == 0) {
+                        __fsm.state = e_worker_state_calc;
                         printf("__calc1\n");
                         __calc();
                         break;
                     }
-                    _worker_pri.state = e_worker_state_read_data;
+                    __fsm.state = e_worker_state_read_data;
                 }
                 break;
             case e_worker_state_read_data:
                 printf("read data\n");
 
-                if (evbuffer_get_length(input) >= _worker_pri.data_len) {
-                    _worker_pri.data = malloc(_worker_pri.data_len);
-                    memset(_worker_pri.data, 0, _worker_pri.data_len);
-                    evbuffer_remove(input, _worker_pri.data, _worker_pri.data_len);
-                    _worker_pri.state = e_worker_state_calc;
-                    //printf("data = %s\n", _worker_pri.data);
+                if (evbuffer_get_length(input) >= __fsm.data_len) {
+                    __fsm.data = malloc(__fsm.data_len);
+                    memset(__fsm.data, 0, __fsm.data_len);
+                    evbuffer_remove(input, __fsm.data, __fsm.data_len);
+                    __fsm.state = e_worker_state_calc;
+                    //printf("data = %s\n", __fsm.data);
                     printf("__calc2\n");
                     __calc();
                 }
@@ -308,76 +300,59 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
 }
 
 void worker_run() {
-    worker_pool_t *pool = g_worker_pool;
-
     usleep(1000);
-    logi("worker#%u setup\n", pool->idx);
 
-    //event_reinit(g_base);
-    //cpunode_httpd_free();
-    //event_base_free(g_base);
-    //g_base = NULL;
-    //
-    
-    /*
+    memset(&__fsm, 0, sizeof(__fsm));
+    __fsm.state = e_worker_state_idle;
 
-    struct event_base *base = event_base_new();
-    if (!base) {
-        loge("worker#%u event_base_new failed\n", pool->idx);
-        sleep(2);
-        exit(1);
-    }
-    */
-
-    worker_t *worker = &(pool->workers[pool->idx]);
-
-    /*
-
-    struct bufferevent *bev = bufferevent_socket_new(base, worker->pipefd[0], 0);
-    if (!bev) {
-        loge("worker#%u bufferevent_socket_new failed.\n");
-        sleep(2);
-        exit(1);
-    }
-
-    bufferevent_setcb(bev, __worker_readcb, NULL, NULL, NULL);
-    bufferevent_enable(bev, EV_READ);
-    bufferevent_enable(bev, EV_WRITE);
-    */
-
-    memset(&_worker_pri, 0, sizeof(_worker_pri));
-    _worker_pri.worker = &pool->workers[pool->idx];
-    _worker_pri.state = e_worker_state_idle;
-    //_worker_pri.base = g_worker_base;
-    //_worker_pri.bev = bev;
-
-    logi("worker#%u setup ok, loop\n", pool->idx);
+    logi("worker#%u setup ok, loop\n", g_worker_id);
 
     event_base_dispatch(g_worker_base);
-    // close listener
-    // close base
 
-    logi("worker#%u exit\n", pool->idx);
+    if (g_worker_listener) {
+        evconnlistener_free(g_worker_listener);
+        g_worker_listener = NULL;
+    }
+    if (g_worker_base) {
+        event_base_free(g_worker_base);
+        g_worker_base = NULL;
+    }
+
+    logi("worker#%u exit\n", g_worker_id);
     exit(0);
 }
 
 void worker_listener_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *sa, int socklen, void *user_data) {
-
-    printf("worker listened\n");
-    struct bufferevent *bev = NULL;
-    bev = bufferevent_socket_new(g_worker_base, fd, BEV_OPT_CLOSE_ON_FREE);
-    if (!bev) {
-       fprintf(stderr, "Error constructing bufferevent!");
-       event_base_loopbreak(g_worker_base);
-       return;
+    if (__fsm.state != e_worker_state_idle) {
+        loge("worker#%u got a connection when non-idle, then disconnect\n", g_worker_id);
+        goto _E;
     }
-    _worker_pri.bev = bev;
-    printf("worker create bev\n");
+    logd("worker#%u got a connection\n", g_worker_id);
 
+    struct bufferevent *bev = bufferevent_socket_new(g_worker_base, fd, BEV_OPT_CLOSE_ON_FREE);
+    if (!bev) {
+        loge("worker#%u bufferevent_socket_new failed, then disconnect\n", g_worker_id);
+        goto _E;
+    }
+    __fsm.bev = bev;
     bufferevent_setcb(bev, __worker_readcb, __worker_writecb, __worker_eventcb, NULL);
     bufferevent_enable(bev, EV_WRITE);
     bufferevent_enable(bev, EV_READ);
+
+    return;
+
+_E:
+    if (evutil_closesocket(fd)) {
+        loge("worker#%u evutil_closesocket failed, then break\n", g_worker_id);
+        sleep(3);
+        event_base_loopbreak(g_worker_base);
+        return;
+    }
+    return;
 }
-void worker_accept_error_cb(struct evconnlistener *listener, void *ctx) {
-    printf("worker accept error\n");
+
+void worker_listener_error_cb(struct evconnlistener *listener, void *ctx) {
+    loge("worker#%u got evconnlistener error, then exit(1)\n", g_worker_id);
+    sleep(3);
+    exit(1);
 }

@@ -22,6 +22,9 @@
 
 extern struct event_base *g_base;
 extern int g_base_worker_port;
+extern unsigned int g_worker_num;
+extern unsigned int g_worker_id;
+extern worker_t *g_workers;
 
 struct event *g_eval_timer = NULL;
 struct timeval g_eval_timeval = { 0, 1000000}; 
@@ -280,7 +283,7 @@ void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
 
     method = evhttp_request_get_command(req);
 
-    logd("cpunode_handle_eval in idx = %u\n", g_worker_pool->idx);
+    logd("cpunode_handle_eval, g_worker_id = %u\n", g_worker_id);
     logi("Received request. uri: %s, method:%d, from: %s:%d\n", evhttp_request_get_uri(req), method, req->remote_host, req->remote_port);
 
     evhttp_add_header(evhttp_request_get_output_headers(req), "Content-Type", "text/json; charset=UTF-8");  
@@ -485,10 +488,10 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
 u_int16_t get_free_worker() {
     printf("get_free_worker\n");
     int i;
-    if (!g_worker_pool) return 0;
-    for (i = 1; i <= g_worker_pool->worker_num; i++) {
+    if (!g_workers) return 0;
+    for (i = 1; i <= g_worker_num; i++) {
         printf("i = %d\n", i);
-        worker_t *worker = &(g_worker_pool->workers[i]);
+        worker_t *worker = &(g_workers[i]);
         printf("worker->alive = %d, worker->busy = %d\n", worker->alive, worker->busy);
         if (worker->alive && !worker->busy) {
             int binding = 0;

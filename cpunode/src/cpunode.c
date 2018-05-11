@@ -132,16 +132,16 @@ int main(int argc, char *argv[]) {
         goto _E;
     }
 
-    if (__load_vipkid_engine_cfg(g_conf)) {
-        goto _E;
-    }
+    //if (__load_vipkid_engine_cfg(g_conf)) {
+    //    goto _E;
+    //}
     
     
     if (cpunode_httpd_init(g_conf, port)) {
         goto _E;
     }
     
-    if (init_worker_pool(g_conf)) {
+    if (init_workers(g_conf)) {
         goto _E;
     }
 

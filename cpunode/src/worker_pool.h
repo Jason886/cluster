@@ -9,7 +9,6 @@
 
 #include "libconfig.h"
 #include <sys/types.h>
-#include <event2/util.h>
 
 #define WORKER_FRAME_MAGIC_HEAD "CHIVOX_CPUNODE_WORKER_FRAME_HEAD_359152155\0\0\0\0\0\0\0\0"
 
@@ -19,25 +18,17 @@ extern "C" {
 
 typedef struct worker {
     pid_t pid;
-    //evutil_socket_t pipefd[2];  // 0-子进程使用 1-父进程使用
-    //struct bufferevent *bev;
-    u_int16_t used; // 子进程使用
+    unsigned short listen_at;
     int8_t alive;
     int8_t busy;
-    void *ud;       // 父进程使用
+    void * task;
 } worker_t;
 
-typedef struct worker_pool {
-    u_int16_t max_use;
-    u_int16_t idx; // 子进程idx从1开始, 主进程idx=0 
-    u_int16_t worker_num; // 子进程数
-    worker_t workers[0];
-} worker_pool_t;
+int init_workers(struct config *conf);
 
-extern worker_pool_t *g_worker_pool;
-
-int init_worker_pool(struct config *conf);
-
+extern worker_t *g_workers;
+extern unsigned int g_worker_num;
+extern unsigned int g_worker_max_use;
 
 #ifdef __cplusplus
 }
