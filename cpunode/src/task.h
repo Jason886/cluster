@@ -28,8 +28,7 @@ typedef struct task {
     int bind_worker_idx; // 绑定的工作进程编号 0-未绑定 >0 工作进程编号
 
     char *result;
-    size_t result_size;
-    size_t result_recved;
+    u_int32_t result_len;
     int recv_state; // 0-recv header 1-recv len 2-recv data -1- recv done
 } task_t;
 

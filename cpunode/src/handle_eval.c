@@ -69,7 +69,8 @@ static void __dispatch_error_1(struct evhttp_request *req, int errno, const char
             }
         }
         evhttp_send_reply(req, 200, "OK", evb);
-        loge("response error: %*.s\n", EVBUFFER_DATA(evb), EVBUFFER_LENGTH(evb));
+        //!!! loge的参数不对
+        //loge("response error: %*.s\n", EVBUFFER_DATA(evb), EVBUFFER_LENGTH(evb));
         evbuffer_free(evb);
     }
 }
@@ -235,6 +236,10 @@ static void __handle(struct evhttp_request *req, const char *boundary) {
             __dispatch_error_1(req, 10008, NULL, j_req, req_params.token);
             goto _E;
         }
+        if (memcmp(req_params.fileurl, "http://", 7) != 0) {
+            __dispatch_error_1(req, 10005, NULL, j_req, req_params.token);
+            goto _E;
+        }
     }
 
     // !!! auth 10007
@@ -309,25 +314,33 @@ void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
 
 static void __task_eventcb(struct bufferevent *bev, short events, void *user_data) {
     printf("__task_eventcb\n");
-}
+    if (events & BEV_EVENT_EOF) {
+        printf("task event eof\n");
 
-static void __task_writecb(struct bufferevent *bev, void *user_data) {
+    } else if (events & BEV_EVENT_ERROR) {
+        printf("task event error\n");
+        bufferevent_free(bev);
+
+    } else if (events & BEV_EVENT_CONNECTED) {
+        printf(" task event connected\n");
+    } else if (events & BEV_EVENT_TIMEOUT) {
+        printf("task event timeout\n");
+    }
+
 }
 
 static void __task_readcb(struct bufferevent *bev, void *user_data) {
     task_t *task = user_data;
     struct evbuffer *input = bufferevent_get_input(bev);
-    size_t size = evbuffer_get_length(input);
-    char *tmp;
-    size_t tmp_size = 0;
-    size_t magic_size = sizeof(WORKER_FRAME_MAGIC_HEAD);
+    u_int32_t result_len;
+    int left_n;
 
     printf("!!!!! 111\n");
 
     if (!task) {
         loge("__task_readcb got null task\n");
-        if (size > 0) {
-            evbuffer_drain(input, size);
+        if (evbuffer_get_length(input)) {
+            evbuffer_drain(input, evbuffer_get_length(input));
         }
         return;
     }
@@ -336,50 +349,50 @@ static void __task_readcb(struct bufferevent *bev, void *user_data) {
     while(evbuffer_get_length(input) > 0) {
         switch (task->recv_state) {
             case 0:
-                printf("!!!!! 333\n");
-                tmp_size = 0;
-                tmp = evbuffer_readln(input, &tmp_size, EVBUFFER_EOL_ANY);
-                if (tmp) {
-                    if (tmp_size >= magic_size && 
-                        memcmp(tmp+tmp_size-magic_size, WORKER_FRAME_MAGIC_HEAD, magic_size) == 0) {
-                        task->recv_state = 1;
-                        if (task->result) free(task->result); task->result = NULL;
-                        task->result_size = 0;
-                        task->result_recved = 0;
-                    } else {
-                        //printf("diuqi yes\n");
-                    }
-                    free(tmp);
-                    tmp = NULL;
+                if (evbuffer_get_length(input) < sizeof(result_len)) {
+                    return;
                 }
+                left_n = sizeof(result_len);
+                while (left_n > 0) {
+                    int read_n = evbuffer_remove(input, ((char *)&result_len) + sizeof(result_len) - left_n, left_n);
+                    if (read_n < 0) {
+                        // !!! loge
+                        //loge("task#%u evbuffer_remove failed\n", g_worker_id);
+                        continue;
+                    }
+                    left_n -= read_n;
+                }
+                printf("result_len:%d\n", result_len);
+                if (result_len == 0) {
+                    // !!! error
+                    task->recv_state = -1;
+                    return;
+                }
+                task->result_len = result_len;
+                task->recv_state = 1;
                 break;
             case 1:
-                printf("!!!!! 444\n");
-                tmp_size = 0;
-                task->result_size = 0;
-                tmp = evbuffer_readln(input, NULL, EVBUFFER_EOL_ANY);
-                if (tmp) {
-                    int len = atoi(tmp);
-                    free(tmp);
-                    tmp = NULL;
-                    if (len < 0) len = 0;
-                    task->result_size = len;
-                    if (task->result_size == 0) {
-                        task->recv_state = -1;
-                        goto __RECV_OK;
-                    }
-                    task->recv_state = 2;
+                printf("read_result\n");
+                if (evbuffer_get_length(input) < task->result_len) {
+                    // error!!!
+                    return;
                 }
+                task->result = malloc(task->result_len+1);
+
+                left_n = task->result_len;
+                while (left_n > 0) {
+                    int read_n = evbuffer_remove(input, task->result + task->result_len - left_n, left_n);
+                    if (read_n < 0) {
+                        continue;
+                    }
+                    left_n -= read_n;
+                }
+                task->recv_state = 2;
+
                 break;
             case 2:
                 printf("!!!!! 555\n");
-                if (evbuffer_get_length(input) >= task->result_size) {
-                    task->result = malloc(task->result_size +1);
-                    memset(task->result, 0, task->result_size +1);
-                    task->result_recved = evbuffer_remove(input, task->result, task->result_size);
-                    task->recv_state = -1;
-                    goto __RECV_OK;
-                }
+                goto __RECV_OK;
                 break;
             case -1:
                 logd("recv done, drain\n");
@@ -421,19 +434,9 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
 
                 struct bufferevent *bev = bufferevent_socket_new(g_base, -1, BEV_OPT_CLOSE_ON_FREE);
 
-                //struct bufferevent *bev = bufferevent_socket_new(g_base, g_worker_pool->workers[free_idx].pipefd[1], 0);
-                
-                //struct bufferevent *bev = g_worker_pool->workers[free_idx].bev;
-                //struct bufferevent *bev = bufferevent_socket_new(g_base, g_worker_pool->workers[free_idx].pipefd[1], 0);
-                //if (!bev) {
-                //    task = task_get_next(task);
-                //    continue;
-                //}
-                // !!! 清空管道的input
-                //
                 printf("111111\n");
 
-                bufferevent_setcb(bev, __task_readcb, __task_writecb, __task_eventcb, task);
+                bufferevent_setcb(bev, __task_readcb, NULL, __task_eventcb, task);
                 bufferevent_enable(bev, EV_READ);
                 bufferevent_enable(bev, EV_WRITE);
                 printf("22222\n");
@@ -452,25 +455,23 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
                 printf("4444\n");
 
                 // 向管道写
-                bufferevent_write(bev, "\n", 1);
-                bufferevent_write(bev, WORKER_FRAME_MAGIC_HEAD, sizeof(WORKER_FRAME_MAGIC_HEAD));
-                bufferevent_write(bev, "\n", 1);
-
-                printf("55555\n");
 
                 char *ori_req = cJSON_PrintUnformatted(task->j_req);
-                bufferevent_write(bev, ori_req, strlen(ori_req));
+                u_int32_t req_len = strlen(ori_req);
+                bufferevent_write(bev, &req_len, sizeof(req_len) );
+                bufferevent_write(bev, ori_req, req_len);
                 free(ori_req);
-                bufferevent_write(bev, "\n", 1);
-                if (task->data && task->size > 0) {
-                    char tmp[128];
-                    snprintf(tmp, sizeof(tmp), "%d\n", task->size);
-                    bufferevent_write(bev, tmp, strlen(tmp));
-                    bufferevent_write(bev, task->data, task->size);
-                } else {
-                    bufferevent_write(bev, "0\n", 2);
+
+                //task->size = 5000;
+                //task->data = malloc(5000);
+                //memset(task->data, 'h', 4999);
+                //task->data[4999] = 0;
+
+                u_int32_t data_len =  task->data ? task->size : 0;
+                bufferevent_write(bev, &data_len, sizeof(data_len));
+                if (data_len > 0) {
+                    bufferevent_write(bev, task->data, data_len);
                 }
-                bufferevent_write(bev, "\n", 1);
 
                 printf("66666\n");
             }

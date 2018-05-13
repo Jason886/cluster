@@ -119,6 +119,12 @@ int http_post (
     }
 
     const char *host = evhttp_uri_get_host(evuri);
+    if (!host || strlen(host) == 0) {
+        loge("no host in url: %s\n", url);
+        free(post);
+        evhttp_uri_free(evuri);
+        return -1;
+    }
     int port = evhttp_uri_get_port(evuri);
     if (port <= 0) port = 80;
 
