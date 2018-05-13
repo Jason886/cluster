@@ -10,8 +10,6 @@
 #include "libconfig.h"
 #include <sys/types.h>
 
-#define WORKER_FRAME_MAGIC_HEAD "CHIVOX_CPUNODE_WORKER_FRAME_HEAD_359152155\0\0\0\0\0\0\0\0"
-
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -30,11 +30,12 @@ static struct err_cfg errors[] = {
     { 10006, 1,  "no secretkey"},
     { 10007, 1, "auth failed"},
     { 10008, 1, "upload file empty or no fileurl"},
-    { 10009, 1, "server internal error"},
+    { 10009, 1, ""},
     { 10010, 1, "no callback"},
     { 10011, 1, "internal error"},
     { 10012, 1, "invalid fea data"},
     { 10013, 1, "download file empty from fileurl"},
+    { 10014, 1, "callback not begin with http"},
 
 
     { 20001, 1, "invalid request"},

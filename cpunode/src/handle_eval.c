@@ -36,12 +36,14 @@ typedef struct eval_req_params {
     int _has_callback:1;
     int _has_fileurl:1;
     int _has_compress:1;
+    int _has_isfea:1;
     char token[_PARAM_VALUE_SIZE];
     char appkey[_PARAM_VALUE_SIZE];
     char secretkey[_PARAM_VALUE_SIZE];
     char callback[_PARAM_VALUE_SIZE];
     char fileurl[_PARAM_VALUE_SIZE];
     int compress:1;
+    int isfea;
     struct evbuffer *ev_file;
 } eval_req_params_t;
 
@@ -75,7 +77,7 @@ static void __dispatch_error_1(struct evhttp_request *req, int errno, const char
     }
 }
 
-static void __dispatch_result(struct evhttp_request *req, struct cJSON *j_req, char *token, char *result) {
+static void __dispatch_async_commit(struct evhttp_request *req, struct cJSON *j_req, char *token, char *result) {
     struct evbuffer *evb = evbuffer_new();
     char *req_text = cJSON_PrintUnformatted(j_req);
     if (result) {
@@ -86,6 +88,9 @@ static void __dispatch_result(struct evhttp_request *req, struct cJSON *j_req, c
     evhttp_send_reply(req, 200, "OK", evb);
     if (req_text) free(req_text);
     evbuffer_free(evb);
+}
+
+static void __dispatch_worker_result() {
 }
 
 static int __fill_req_params(struct evhttp_request *req, const char *boundary, eval_req_params_t * req_params) {
@@ -152,6 +157,10 @@ static int __fill_req_params(struct evhttp_request *req, const char *boundary, e
                         req_params->_has_compress = 1;
                         req_params->compress = atoi(value);
                     }
+                    else if(strcmp(param, "isfea") == 0) {
+                        req_params->_has_isfea = 1; 
+                        req_params->isfea = atoi(value);
+                    }
 
                     break;
             }
@@ -193,7 +202,7 @@ static void __handle(struct evhttp_request *req, const char *boundary) {
 
     j_req = cJSON_CreateObject();
     if (!j_req) {
-        __dispatch_error_1(req, 10009, "internal error, handle_eval create j_req", NULL, NULL);
+        __dispatch_error_1(req, 10011, "internal error, handle_eval create j_req", NULL, NULL);
         goto _E;
     }
 
@@ -214,6 +223,9 @@ static void __handle(struct evhttp_request *req, const char *boundary) {
     }
     if (req_params._has_compress) {
         cJSON_AddNumberToObject(j_req, "compress", req_params.compress);
+    }
+    if (req_params._has_isfea) {
+        cJSON_AddNumberToObject(j_req, "isfea", req_params.isfea);
     }
 
     if (!req_params._has_token || strlen(req_params.token) == 0) {
@@ -242,6 +254,12 @@ static void __handle(struct evhttp_request *req, const char *boundary) {
         }
     }
 
+    if (req_params.callback && strlen(req_params.callback) > 0) {
+        if (memcmp(req_params.callback, "http://", 7) != 0) {
+            __dispatch_error_1(req, 10014, NULL, j_req, req_params.token);
+        }
+    }
+
     // !!! auth 10007
 
     if (req_params.ev_file) {
@@ -251,7 +269,7 @@ static void __handle(struct evhttp_request *req, const char *boundary) {
 
     task = task_new(uri, j_req, data, size);
     if (!task) {
-        __dispatch_error_1(req, 10009, "internal error, task_new failed", j_req, req_params.token);
+        __dispatch_error_1(req, 10011, "internal error, task_new failed", j_req, req_params.token);
         goto _E;
     }
 
@@ -263,7 +281,7 @@ static void __handle(struct evhttp_request *req, const char *boundary) {
     if (task->is_async) {
         task_add_tail(task);
         task_list_dump();
-        __dispatch_result(req, j_req, req_params.token, NULL);
+        __dispatch_async_commit(req, j_req, req_params.token, NULL);
     } else {
         __dispatch_error_1(req, 10010, NULL,  j_req, req_params.token);
         goto _E;
@@ -434,46 +452,37 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
 
                 struct bufferevent *bev = bufferevent_socket_new(g_base, -1, BEV_OPT_CLOSE_ON_FREE);
 
-                printf("111111\n");
-
                 bufferevent_setcb(bev, __task_readcb, NULL, __task_eventcb, task);
                 bufferevent_enable(bev, EV_READ);
                 bufferevent_enable(bev, EV_WRITE);
-                printf("22222\n");
 
                 struct sockaddr_in sin;
                 memset(&sin, 0, sizeof(sin));
                 sin.sin_family = AF_INET;
                 sin.sin_addr.s_addr = inet_addr("127.0.0.1");
-                sin.sin_port = htons(g_base_worker_port+free_idx);
-                printf("33333\n");
+                sin.sin_port = htons(g_base_worker_port + free_idx);
 
                 if (bufferevent_socket_connect(bev, (struct sockaddr*)&sin, sizeof(sin))) {
-                    printf("connect error\n");
-                    // !!! error
+                    __dispatch_worker_result();
+                    //__dispatch_error_1(NULL, 10011, "internal error, task bind failed", NULL, NULL);
+                    // unbind
+                    // !!!
+                    continue;
                 }
-                printf("4444\n");
 
                 // 向管道写
 
-                char *ori_req = cJSON_PrintUnformatted(task->j_req);
-                u_int32_t req_len = strlen(ori_req);
+                char *req_text = cJSON_PrintUnformatted(task->j_req);
+                u_int32_t req_len = strlen(req_text);
                 bufferevent_write(bev, &req_len, sizeof(req_len) );
-                bufferevent_write(bev, ori_req, req_len);
-                free(ori_req);
-
-                //task->size = 5000;
-                //task->data = malloc(5000);
-                //memset(task->data, 'h', 4999);
-                //task->data[4999] = 0;
+                bufferevent_write(bev, req_text, req_len);
+                free(req_text);
 
                 u_int32_t data_len =  task->data ? task->size : 0;
                 bufferevent_write(bev, &data_len, sizeof(data_len));
                 if (data_len > 0) {
                     bufferevent_write(bev, task->data, data_len);
                 }
-
-                printf("66666\n");
             }
         }
 
