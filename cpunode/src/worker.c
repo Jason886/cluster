@@ -327,7 +327,7 @@ static void __do_calc() {
 
     cJSON_Delete(j_res);
 
-    logd("worker#%u write result. %s\n", g_worker_id, _fsm.result);
+    logd("worker#%u success. %s\n", g_worker_id, _fsm.result);
     _fsm.state = e_worker_state_write_result;
     __write_result();
     return;
@@ -422,12 +422,7 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
         switch(_fsm.state) {
 
             case e_worker_state_idle:
-                loge("worker#%u recv data when idle\n", g_worker_id);
-                if (evbuffer_drain(input, evbuffer_get_length(input)) < 0) {
-                    loge("wroker#%u, evbuffer_drain failed\n", g_worker_id);
-                    return;
-                };
-                break;
+                return;
 
             case e_worker_state_read_cmd_len:
                 if (evbuffer_get_length(input) < sizeof(cmd_len)) {

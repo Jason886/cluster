@@ -9,18 +9,21 @@ extern "C" {
 #endif
 
 struct bufferevent;
+struct evhttp_request;
 
 typedef enum {
-    e_task_state_read_failed = -1,
-    e_task_state_read_len = 0,
-    e_task_state_read_result = 1,
-    e_task_state_read_done = 2,
+    e_task_state_wait = 0,
+    e_task_state_read_len = 1,
+    e_task_state_read_result = 2,
+    e_task_state_response = 3,
+    e_task_state_failed = 4,
 } e_task_state_t;
 
 typedef struct task {
     struct task *next;
     struct task *prev;
 
+    struct evhttp_request *req;
     char *req_path;
     struct cJSON *j_req;
     char *token;
@@ -35,7 +38,7 @@ typedef struct task {
 
     int binded;
     int bind_worker_idx; // 绑定的工作进程编号 0-未绑定 >0 工作进程编号
-    struct bufferevent *bev;
+    //struct bufferevent *bev;
 
     char *result;
     u_int32_t result_len;
@@ -54,7 +57,7 @@ task_t *task_get_next(task_t *task);
 
 void task_remove(task_t *task);
 
-void task_list_dump();
+const char *task_list_dump();
 
 #ifdef __cplusplus
 }

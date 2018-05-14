@@ -87,7 +87,7 @@ task_t * task_new( const char *req_path, struct cJSON *j_req, char *data, size_t
 
     task->binded = 0;
     task->bind_worker_idx = 0;
-    task->bev = NULL;
+    //task->bev = NULL;
 
     task->result = NULL;
     task->result_len = 0;
@@ -143,16 +143,33 @@ void task_remove(task_t *task) {
     }
 }
 
-void task_list_dump() {
+const char * task_list_dump() {
     static char tmp[81920] = {0};
+    size_t pos = 0;
+
+    snprintf(tmp, sizeof(tmp),
+            "\n"
+            "---------------\n"
+            "dump task list:\n"
+        );
+    pos = strlen(tmp);
+
     int i = 0;
     task_t *cur = task_get_head();
-    snprintf(tmp, sizeof(tmp), "dump task list:\n");
     while (cur) {
-        snprintf(tmp, sizeof(tmp), "\t[%d] token:%s callback:%s fileurl:%s binded:%d bind_worker_idx:%d \n", i, cur->token, cur->callback, cur->fileurl, cur->binded, cur->bind_worker_idx);
+        if (sizeof(tmp) - pos <= 512) {
+            snprintf(tmp+pos, sizeof(tmp)-pos, "\n...\n");
+            pos = strlen(tmp);
+            break;
+        }
+        snprintf(tmp+pos, sizeof(tmp)-pos, 
+                "[%d]\ttoken:%s\n\tcallback:%s\n\tfileurl:%s\n\tbinded:%d\n\tbind_worker_idx:%d\n\tstate:%d\n\n",
+                i, cur->token, cur->callback, cur->fileurl, cur->binded, cur->bind_worker_idx, cur->recv_state);
+        pos = strlen(tmp);
+
         cur = task_get_next(cur);
         i++;
     }
-    snprintf(tmp, sizeof(tmp), "\n");
-    logd(tmp);
+    snprintf(tmp+pos, sizeof(tmp)-pos, "---------------\n");
+    return tmp;
 }
