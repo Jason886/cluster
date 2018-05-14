@@ -29,7 +29,7 @@ static struct err_cfg errors[] = {
     { 10005, 1,  "fileurl not begin with http"},
     { 10006, 1,  "no secretkey"},
     { 10007, 1, "auth failed"},
-    { 10008, 1, "upload file empty or no fileurl"},
+    { 10008, 1, "empty upload file and no fileurl"},
     { 10009, 1, ""},
     { 10010, 1, "no callback"},
     { 10011, 1, "internal error"},

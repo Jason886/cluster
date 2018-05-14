@@ -83,7 +83,7 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
 }
 
 
-int http_download_start (
+int http_download (
         struct event_base *base,
         const char *url,
 

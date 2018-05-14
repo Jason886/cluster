@@ -62,24 +62,14 @@ static void __reset_fsm_data() {
     _fsm.result_len = 0;
 }
 
-typedef struct {
-    float time_rate;
-    float speech_time;
-    float speech_time_per;
-    float eng_time;
-    float eng_time_per;
-    int wrd_nums; 
-    float wrd_nums_div_time;
-} result_t;
-
 static int __make_result(struct cJSON *j_res, char **errmsg) {
     if (!j_res) return -1;
 
     struct cJSON *j_time_rate = cJSON_GetObjectItem(j_res, "time_rate");
-    if (!j_time_rate || j_time_rate->type != cJSON_Number) {
-        *errmsg = "internal error, engine result no time_rate";
-        return -1;
-    }
+    //if (!j_time_rate || j_time_rate->type != cJSON_Number) {
+    //    *errmsg = "internal error, engine result no time_rate";
+    //    return -1;
+    //}
     struct cJSON *j_speech_time = cJSON_GetObjectItem(j_res, "speech_time");
     if (!j_speech_time || j_speech_time->type != cJSON_Number) {
         *errmsg = "internal error, engine result no speech_time";
@@ -117,7 +107,7 @@ static int __make_result(struct cJSON *j_res, char **errmsg) {
                 "\"word\": {\"count\": %d, \"rate\": %0.4f},"
                 "\"voice\": {\"duration\": %0.4f, \"percent\": %0.4f},"
                 "\"english\": {\"duration\": %0.4f, \"percent\": %0.4f},"
-                "\"time_rate\": %0.4f"
+                "\"time_rate\": %s"
             "},"
             "\"request\":%s"
         "}";
@@ -128,11 +118,17 @@ static int __make_result(struct cJSON *j_res, char **errmsg) {
         token = j_token->valuestring; 
     }
     
-    size_t len = strlen(fmt) + (token?strlen(token):4) +  (_fsm.cmd?strlen(_fsm.cmd):4) + 256;
+    size_t len = strlen(fmt) + (token?strlen(token):4) +  (_fsm.jcmd?strlen(_fsm.cmd):4) + 256;
     char *result = malloc(len);
     if (!result) {
-        *errmsg = "malloc result failed";
+        *errmsg = "internal error, __make_result: malloc result failed";
         return -1;
+    }
+
+    char time_rate[30];
+    strcpy(time_rate, "null");
+    if (j_time_rate && j_time_rate->type == cJSON_Number) {
+        snprintf(time_rate, sizeof(time_rate), "%0.4f", j_time_rate->valuedouble);
     }
 
     snprintf(result, len, fmt,
@@ -146,10 +142,10 @@ static int __make_result(struct cJSON *j_res, char **errmsg) {
             j_eng_time_per->valuedouble,
             j_speech_time->valuedouble,
             j_speech_time_per->valuedouble,
-            j_time_rate->valuedouble,
+            time_rate,
 
-            _fsm.cmd?_fsm.cmd:"null"
-            );
+            _fsm.jcmd?_fsm.cmd:"null"
+        );
     
     if (_fsm.result) free(_fsm.result);
     _fsm.result = result;
@@ -159,15 +155,14 @@ static int __make_result(struct cJSON *j_res, char **errmsg) {
 
 static void __write_result() {
     u_int32_t len = _fsm.result_len;
-    int ret;
-
     struct evbuffer *output = bufferevent_get_output(_fsm.bev);
-    ret = evbuffer_add(output, &len, sizeof(len));
-    if (!ret) {
-        ret = evbuffer_add(output, _fsm.result, len);
+
+    int write_ret = evbuffer_add(output, &len, sizeof(len));
+    if (write_ret == 0) { // suc
+        if (len > 0) write_ret = evbuffer_add(output, _fsm.result, len);
     }
     __reset_fsm_data();
-    if (ret) {
+    if (write_ret != 0) { // fail
         if (_fsm.bev) bufferevent_free(_fsm.bev);
         _fsm.bev = NULL;
         _fsm.state = e_worker_state_idle;
@@ -180,13 +175,31 @@ static void __make_error_result(int errno, const char *info) {
     if (!info) info = cpunode_errmsg(errno);
     if (!info) info = "";
 
-    const char *errfmt = "{\"error\": {\"errno\":%d, \"info\":\"%s\"}}"; 
+    const char *errfmt = "{"
+            "\"token\": %s%s%s,"
+            "\"error\": {\"errno\":%d, \"info\":\"%s\"},"
+            "\"request\": %s"
+        "}"; 
 
-    size_t len = strlen(errfmt) + strlen(info) + 32;
+    char *token = NULL;
+    if (_fsm.jcmd) {
+        struct cJSON *j_token = cJSON_GetObjectItem(_fsm.jcmd, "token");
+        if (j_token && j_token->type == cJSON_String) {
+            token = j_token->valuestring; 
+        }
+    }
+
+    size_t len = strlen(errfmt) + (token?strlen(token):4) + (_fsm.jcmd?strlen(_fsm.cmd):4) + strlen(info) + 64;
     char *result = malloc(len);
     if (result) {
         memset(result, 0, len);
-        snprintf(result, len, errfmt, errno, info);
+        snprintf(result, len, errfmt,
+                token?"\"":"",
+                token?token:"null",
+                token?"\"":"",
+                errno, info,
+                _fsm.jcmd?_fsm.cmd:"null"
+            );
     }
     
     if (_fsm.result) free(_fsm.result);
@@ -202,21 +215,21 @@ static void __write_error(int errno, char *info) {
 static int __check_fea_data(char *data, size_t size) {
     uint32_t vad_len, rec_len;
     if(size < 4) {
-            return -1;
-        }
+        return -1;
+    }
     memcpy(&vad_len, data, 4);
     
     if(size < vad_len+4 + 4) {
-            return -1;
-        }
+        return -1;
+    }
     memcpy(&rec_len, data+vad_len+4, 4);
     if(size < vad_len + rec_len + 8) {
-            return -1;
-        }
+        return -1;
+    }
 
     if(vad_len/24 != rec_len/40) {
-            return -1;
-        }
+        return -1;
+    }
 
     return 0;
 }
@@ -244,14 +257,14 @@ static void __do_calc() {
     if (!engine) {
         loge("worker#%u wtk_vipkid_engine_new failed. %s\n", g_worker_id, _fsm.cmd);
         _fsm.state = e_worker_state_write_result;
-        __write_error(10011, "internal error, engine new failed\n");
+        __write_error(10011, "internal error, engine new failed");
         return;
     }
 
     if (wtk_vipkid_engine_start(engine)) {
         loge("worker#%u wtk_vipkid_engine_start failed. %s\n", g_worker_id, _fsm.cmd);
         _fsm.state = e_worker_state_write_result;
-        __write_error(10011, "internal error, engine start failed\n");
+        __write_error(10011, "internal error, engine start failed");
         wtk_vipkid_engine_delete(engine);
         return;
     }
@@ -276,7 +289,7 @@ static void __do_calc() {
     if (ret) {
         loge("worker#%u wtk_vipkid_engine_feed_* failed. %s\n", g_worker_id, _fsm.cmd);
         _fsm.state = e_worker_state_write_result;
-        __write_error(10011, "internal error, engine feed failed\n");
+        __write_error(10011, "internal error, engine feed failed");
         wtk_vipkid_engine_delete(engine);
         return;
     }
@@ -288,7 +301,7 @@ static void __do_calc() {
     if (!res || strlen(res) == 0) {
         loge("worker#%u wtk_vipkid_engine result empty. %s\n", g_worker_id, _fsm.cmd);
         _fsm.state = e_worker_state_write_result;
-        __write_error(10011, "internal error, engine result empty\n");
+        __write_error(10011, "internal error, engine result empty");
         //wtk_vipkid_engine_delete(engine);
         return;
     }
@@ -298,7 +311,7 @@ static void __do_calc() {
     if (!j_res || j_res->type != cJSON_Object) {
         loge("worker#%u wtk_vipkid_engine result invalid json. %s ||| request: %s\n", g_worker_id, res, _fsm.cmd);
         _fsm.state = e_worker_state_write_result;
-        __write_error(10011, "internal error, engine result invalid json\n");
+        __write_error(10011, "internal error, engine result invalid json");
         if (j_res) cJSON_Delete(j_res);
         return;
     }
@@ -314,6 +327,7 @@ static void __do_calc() {
 
     cJSON_Delete(j_res);
 
+    logd("worker#%u write result. %s\n", g_worker_id, _fsm.result);
     _fsm.state = e_worker_state_write_result;
     __write_result();
     return;
@@ -335,26 +349,20 @@ static void __download_cb(int result, char *data, unsigned int size) {
         return;
     }
 
-    if (_fsm.data) free(_fsm.data); _fsm.data = NULL;
+    if (_fsm.data) free(_fsm.data);
     _fsm.data = data;
     _fsm.data_len = size;
     __do_calc();
 }
 
 static void __calc() {
-    struct evbuffer *output = bufferevent_get_output(_fsm.bev);
-
     if (_fsm.data) {
         __do_calc();
         return;
     }
 
     struct cJSON *jfileurl = cJSON_GetObjectItem(_fsm.jcmd, "fileurl");
-    if (http_download_start(
-            g_worker_base, 
-            jfileurl->valuestring,
-            __download_cb, 
-            NULL)) {
+    if (http_download(g_worker_base, jfileurl->valuestring, __download_cb, NULL)) {
         loge("worker#%u download failed from fileurl. %s\n", g_worker_id, _fsm.cmd);
         _fsm.state = e_worker_state_write_result;
         __write_error(10011, "internal error, download failed from fileurl");
@@ -397,7 +405,7 @@ static void __worker_writecb(struct bufferevent *bev, void *user_data) {
     if (_fsm.state == e_worker_state_write_result) {
         struct evbuffer *output = bufferevent_get_output(bev);
         if (evbuffer_get_length(output) == 0) {
-            logi("worker#%u write done, now close\n", g_worker_id);
+            logi("worker#%u write done, now close connection\n", g_worker_id);
             if (_fsm.bev) bufferevent_free(_fsm.bev);
             _fsm.bev = NULL;
             _fsm.state = e_worker_state_idle;
@@ -409,13 +417,11 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
     struct evbuffer *input = bufferevent_get_input(bev);
     u_int32_t cmd_len = 0;
     u_int32_t data_len = 0;
-    size_t left_n = 0;
 
     while (evbuffer_get_length(input) > 0) {
         switch(_fsm.state) {
 
             case e_worker_state_idle:
-
                 loge("worker#%u recv data when idle\n", g_worker_id);
                 if (evbuffer_drain(input, evbuffer_get_length(input)) < 0) {
                     loge("wroker#%u, evbuffer_drain failed\n", g_worker_id);
@@ -424,14 +430,13 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
                 break;
 
             case e_worker_state_read_cmd_len:
-
                 if (evbuffer_get_length(input) < sizeof(cmd_len)) {
                     return;
                 }
                 if (__read_buffer(input, (char *)&cmd_len, sizeof(cmd_len))) {
                     loge("worker#%u read cmd_len failed\n", g_worker_id);
                     _fsm.state = e_worker_state_write_result;
-                    __write_error(10011, "internal error, read cmd_len failed\n");
+                    __write_error(10011, "internal error, read cmd_len failed");
                     return;
                 }
                 if (cmd_len == 0) {
@@ -453,14 +458,13 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
                 break;
 
             case e_worker_state_read_cmd:
-
                 if (evbuffer_get_length(input) < _fsm.cmd_len) {
                     return;
                 }
                 if (__read_buffer(input, _fsm.cmd, _fsm.cmd_len)) {
                     loge("worker#%u read cmd failed\n", g_worker_id);
                     _fsm.state = e_worker_state_write_result;
-                    __write_error(10011, "internal error, read cmd failed\n");
+                    __write_error(10011, "internal error, read cmd failed");
                     return;
                 }
                 struct cJSON *jcmd = cJSON_Parse(_fsm.cmd);
@@ -481,16 +485,16 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
                 if (__read_buffer(input, (char *)&data_len, sizeof(data_len))) {
                     loge("worker#%u read data_len failed. %s\n", g_worker_id, _fsm.cmd);
                     _fsm.state = e_worker_state_write_result;
-                    __write_error(10011, "internal error, read data_len failed\n");
+                    __write_error(10011, "internal error, read data_len failed");
                     return;
                 }
                 _fsm.data_len = data_len;
                 if (data_len == 0) {
                     cJSON *jfileurl = cJSON_GetObjectItem(_fsm.jcmd, "fileurl");
                     if (!jfileurl || jfileurl->type != cJSON_String || strlen(jfileurl->valuestring) == 0) {
-                        loge("worker#%u no data or fileurl. %s\n", g_worker_id, _fsm.cmd);
+                        loge("worker#%u empty upload file and no fileurl. %s\n", g_worker_id, _fsm.cmd);
                         _fsm.state = e_worker_state_write_result;
-                        __write_error(10011, "internal error, read none data");
+                        __write_error(10008, NULL);
                         return;
                     }
                     _fsm.state = e_worker_state_calc;
@@ -509,16 +513,14 @@ static void __worker_readcb(struct bufferevent *bev, void *user_data) {
                 break;
 
             case e_worker_state_read_data:
-
                 if (evbuffer_get_length(input) < _fsm.data_len) {
                     return;
                 }
                 if (__read_buffer(input, _fsm.data, _fsm.data_len)) {
                     loge("worker#%u read data failed. %s\n", g_worker_id, _fsm.cmd);
                     _fsm.state = e_worker_state_write_result;
-                    __write_error(10011, "internal error, read data failed\n");
+                    __write_error(10011, "internal error, read data failed");
                     return;
-
                 }
                 _fsm.state = e_worker_state_calc;
                 __calc();
@@ -553,8 +555,7 @@ void worker_run() {
     memset(&_fsm, 0, sizeof(_fsm));
     _fsm.state = e_worker_state_idle;
 
-    logi("worker#%u setup ok, loop\n", g_worker_id);
-
+    logi("worker#%u loop\n", g_worker_id);
     event_base_dispatch(g_worker_base);
 
     if (g_worker_listener) {
@@ -571,6 +572,7 @@ void worker_run() {
 }
 
 void worker_listener_cb(struct evconnlistener *listener, evutil_socket_t fd, struct sockaddr *sa, int socklen, void *user_data) {
+    //goto _E; // !!! need test this in handle_eval.c 
     if (_fsm.state != e_worker_state_idle) {
         loge("worker#%u got a connection when non-idle, then disconnect\n", g_worker_id);
         goto _E;
@@ -589,7 +591,6 @@ void worker_listener_cb(struct evconnlistener *listener, evutil_socket_t fd, str
 
     __reset_fsm_data();
     _fsm.state = e_worker_state_read_cmd_len;
-
     return;
 
 _E:

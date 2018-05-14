@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-int http_download_start (
+int http_download (
         struct event_base *base, 
         const char *url,
         void (*cb)(int result, char *data, unsigned int size),  // note: callback中返回的data，由你来释放. 
