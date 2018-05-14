@@ -1,0 +1,5 @@
+#!/usr/bin/bash
+
+/bin/supervisorctl -c etc/supervisord.conf stop all
+sleep 3
+kill `cat ./pid/cpunodes.pid`

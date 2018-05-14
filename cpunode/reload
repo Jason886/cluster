@@ -1,0 +1,3 @@
+#!/usr/bin/bash
+
+/bin/supervisorctl -c etc/supervisord.conf restart all
