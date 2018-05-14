@@ -112,18 +112,23 @@ static int __make_result(struct cJSON *j_res, char **errmsg) {
     }
 
     const char *fmt = "{"
+            "\"token\":%s%s%s,"
             "\"data\": {"
-                "\"time_rate\":%0.4f,"
-                "\"speech_time\":%.4f,"
-                "\"speech_time_per\":%0.4f,"
-                "\"eng_time\":%0.4f,"
-                "\"eng_time_per\":%0.4f,"
-                "\"wrd_nums\":%d,"
-                "\"wrd_nums_div_time\":%0.4f"
-            "}"
+                "\"word\": {\"count\": %d, \"rate\": %0.4f},"
+                "\"voice\": {\"duration\": %0.4f, \"percent\": %0.4f},"
+                "\"english\": {\"duration\": %0.4f, \"percent\": %0.4f},"
+                "\"time_rate\": %0.4f"
+            "},"
+            "\"request\":%s"
         "}";
+
+    struct cJSON *j_token = cJSON_GetObjectItem(_fsm.jcmd, "token");
+    char *token = NULL;
+    if (j_token && j_token->type == cJSON_String) {
+        token = j_token->valuestring; 
+    }
     
-    size_t len = strlen(fmt) + 256;
+    size_t len = strlen(fmt) + (token?strlen(token):4) +  (_fsm.cmd?strlen(_fsm.cmd):4) + 256;
     char *result = malloc(len);
     if (!result) {
         *errmsg = "malloc result failed";
@@ -131,13 +136,19 @@ static int __make_result(struct cJSON *j_res, char **errmsg) {
     }
 
     snprintf(result, len, fmt,
-            j_time_rate->valuedouble,
-            j_speech_time->valuedouble,
-            j_speech_time_per->valuedouble,
+            token?"\"":"",
+            token?token:"null",
+            token?"\"":"",
+
+            j_wrd_nums->valueint,
+            j_wrd_nums_div_time->valuedouble,
             j_eng_time->valuedouble,
             j_eng_time_per->valuedouble,
-            j_wrd_nums->valueint,
-            j_wrd_nums_div_time->valuedouble
+            j_speech_time->valuedouble,
+            j_speech_time_per->valuedouble,
+            j_time_rate->valuedouble,
+
+            _fsm.cmd?_fsm.cmd:"null"
             );
     
     if (_fsm.result) free(_fsm.result);
