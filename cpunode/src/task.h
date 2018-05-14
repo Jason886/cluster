@@ -8,6 +8,15 @@
 extern "C" {
 #endif
 
+struct bufferevent;
+
+typedef enum {
+    e_task_state_read_failed = -1,
+    e_task_state_read_len = 0,
+    e_task_state_read_result = 1,
+    e_task_state_read_done = 2,
+} e_task_state_t;
+
 typedef struct task {
     struct task *next;
     struct task *prev;
@@ -26,10 +35,11 @@ typedef struct task {
 
     int binded;
     int bind_worker_idx; // 绑定的工作进程编号 0-未绑定 >0 工作进程编号
+    struct bufferevent *bev;
 
     char *result;
     u_int32_t result_len;
-    int recv_state; // 0-recv header 1-recv len 2-recv data -1- recv done
+    e_task_state_t recv_state; 
 } task_t;
 
 task_t * task_new(const char *req_path, struct cJSON *j_req, char *data, size_t size);

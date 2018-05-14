@@ -12,7 +12,7 @@ int http_post (
         const char *url,
         const char *data,
         size_t size,
-        void (*cb)(int result, char *data, unsigned int size), // note: callback中返回的data，你不需要释放。如果需要保存data里的数据，请拷贝出.
+        void (*cb)(int result, char *data, unsigned int size, void *user_data), // note: callback中返回的data，你不需要释放。如果需要保存data里的数据，请拷贝出.
         void *user_data
     );
 

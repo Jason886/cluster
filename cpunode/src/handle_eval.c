@@ -185,6 +185,53 @@ static int __fill_req_params(struct evhttp_request *req, const char *boundary, e
     return 0;
 }
 
+static void __result_callback_cb(int result, char *data, unsigned int size, void *user_data) {
+
+    task_t *task = user_data;
+
+    printf("__result_callback_cb result = %d\n", result);
+
+    if (result != 0) { 
+        task->recv_state = e_task_state_read_len;
+        task_add_tail(task);
+        return;
+    }
+
+    if (!data || size == 0) {
+        printf("__result_callback_cb data empty\n");
+        task->recv_state = e_task_state_read_len;
+        task_add_tail(task);
+        return;
+    }
+
+    char *data_dup = malloc(size +1);
+    memset(data_dup, 0, size+1);
+    memcpy(data_dup, data, size);
+    struct cJSON *j_data = cJSON_Parse(data_dup);
+    if (!j_data) {
+        printf("__result_callback_cb data not json: %s\n", data_dup);
+        task->recv_state = e_task_state_read_len;
+        task_add_tail(task);
+        return;
+    }
+
+    struct cJSON *j_result = cJSON_GetObjectItem(j_data, "result");
+    if (j_result && (
+               (j_result->type == cJSON_Number && j_result->valueint == 0) ||
+               (j_result->type == cJSON_String && strcmp(j_result->valuestring, "0") == 0) 
+                )
+            ) {
+        printf("__result_callback_cb data ok: %s\n", data_dup);
+        task_free(task);
+    }
+    else {
+        printf("__result_callback_cb data error: %s\n", data_dup);
+        task->recv_state = e_task_state_read_len;
+        task_add_tail(task);
+        return;
+    }
+}
+
 static void __handle(struct evhttp_request *req, const char *boundary) {
     eval_req_params_t req_params = {0};
     int errno = 0;
@@ -344,7 +391,18 @@ static void __task_eventcb(struct bufferevent *bev, short events, void *user_dat
     } else if (events & BEV_EVENT_TIMEOUT) {
         printf("task event timeout\n");
     }
+}
 
+static int __read_buffer(struct evbuffer *buffer, char *data, size_t size) {
+    size_t left_n = size;
+    while (left_n > 0) {
+        int read_n = evbuffer_remove(buffer, data + size - left_n, left_n);
+        if (read_n < 0) {
+            return -1;
+        }
+        left_n -= read_n;
+    }
+    return 0;
 }
 
 static void __task_readcb(struct bufferevent *bev, void *user_data) {
@@ -353,8 +411,6 @@ static void __task_readcb(struct bufferevent *bev, void *user_data) {
     u_int32_t result_len;
     int left_n;
 
-    printf("!!!!! 111\n");
-
     if (!task) {
         loge("__task_readcb got null task\n");
         if (evbuffer_get_length(input)) {
@@ -362,58 +418,64 @@ static void __task_readcb(struct bufferevent *bev, void *user_data) {
         }
         return;
     }
-    printf("!!!!! 222\n");
 
     while(evbuffer_get_length(input) > 0) {
         switch (task->recv_state) {
-            case 0:
+            case e_task_state_read_len:
+                printf("e_task_state_read_len\n");
                 if (evbuffer_get_length(input) < sizeof(result_len)) {
                     return;
                 }
-                left_n = sizeof(result_len);
-                while (left_n > 0) {
-                    int read_n = evbuffer_remove(input, ((char *)&result_len) + sizeof(result_len) - left_n, left_n);
-                    if (read_n < 0) {
-                        // !!! loge
-                        //loge("task#%u evbuffer_remove failed\n", g_worker_id);
-                        continue;
-                    }
-                    left_n -= read_n;
+
+                if (__read_buffer(input, (char *)&result_len, sizeof(result_len))) {
+                    // !!! error
+                    loge("task %s __read_buffer failed\n", task->token);
+                    task->recv_state = e_task_state_read_failed;
+                    goto __RECV_OK;
                 }
+
                 printf("result_len:%d\n", result_len);
                 if (result_len == 0) {
                     // !!! error
-                    task->recv_state = -1;
-                    return;
+                    loge("task %s result_len: 0\n", task->token);
+                    task->recv_state = e_task_state_read_failed;
+                    goto __RECV_OK;
                 }
+
+                if (task->result) free(task->result);
+                task->result = malloc(result_len+1);
+                if (!task->result) {
+                    // !!! error
+                    loge("task %s malloc result failed\n", task->token);
+                    task->recv_state = e_task_state_read_failed;
+                    goto __RECV_OK;
+                }
+                memset(task->result, 0, result_len+1);
                 task->result_len = result_len;
-                task->recv_state = 1;
+                task->recv_state = e_task_state_read_result;
                 break;
-            case 1:
-                printf("read_result\n");
+
+            case e_task_state_read_result:
+                printf("e_task_state_read_result\n");
                 if (evbuffer_get_length(input) < task->result_len) {
-                    // error!!!
                     return;
                 }
-                task->result = malloc(task->result_len+1);
 
-                left_n = task->result_len;
-                while (left_n > 0) {
-                    int read_n = evbuffer_remove(input, task->result + task->result_len - left_n, left_n);
-                    if (read_n < 0) {
-                        continue;
-                    }
-                    left_n -= read_n;
+                if (__read_buffer(input, task->result, task->result_len)) {
+                    // !!! error
+                    loge("task %s __read_buffer failed\n", task->token);
+                    task->recv_state = e_task_state_read_failed;
+                    goto __RECV_OK;
                 }
-                task->recv_state = 2;
 
-                break;
-            case 2:
-                printf("!!!!! 555\n");
+                task->recv_state = e_task_state_read_done;
                 goto __RECV_OK;
+
+            case e_task_state_read_done:
+                printf("e_task_state_read_done\n");
                 break;
-            case -1:
-                logd("recv done, drain\n");
+            case e_task_state_read_failed:
+                printf("e_task_state_read_failed\n");
                 evbuffer_drain(input, evbuffer_get_length(input));
                 break;
             default:
@@ -422,22 +484,48 @@ static void __task_readcb(struct bufferevent *bev, void *user_data) {
     }
 
 __RECV_OK:
-    printf("!!!!! 666\n");
-
-    if (task->is_async) {
-        printf("read result %s\n", task->result);
-        task_remove(task);
-    } else {
-        // http响应
-    }
 
     task->binded = 0;
     task->bind_worker_idx = 0;
-    task_free(task);
+
+    bufferevent_free(bev);
+    task->bev = NULL;
+
+    if (task->recv_state == e_task_state_read_done) {
+        if (task->is_async) {
+            printf("read result %s\n", task->result);
+            task_remove(task);
+            if (http_post (
+                        g_base,
+                        task->callback,
+                        task->result,
+                        task->result_len,
+                        __result_callback_cb,
+                        task
+                        ) ) 
+            {
+                loge("task %s callback failed\n", task->token);
+                task_add_tail(task);
+            }
+        } else {
+            // http响应
+            task_remove(task);
+            task_free(task);
+        }
+    } else {
+        task_remove(task);
+        task_add_tail(task);
+    }
 }
 
 void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
     logd("master timer cb\n");
+
+    int free_idx = get_free_worker();
+    if (free_idx <= 0) {
+        logd("no free worker\n");
+        return;
+    }
 
     task_t * task = task_get_head();
     while (task) {
@@ -448,9 +536,15 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
                 // bind
                 task->binded = 1;
                 task->bind_worker_idx = free_idx;
-                logi("bind task %s to worker#%d\n", task->token, free_idx);
+                logi("bind task %s to worker#%u\n", task->token, free_idx);
 
                 struct bufferevent *bev = bufferevent_socket_new(g_base, -1, BEV_OPT_CLOSE_ON_FREE);
+                if (!bev) {
+                    loge("bind task %s to worker#%u failed, bufferevent_socket_new failed\n", task->token, free_idx);
+                    task->bind_worker_idx = 0;
+                    task->binded = 0;
+                    goto _NEXT;
+                }
 
                 bufferevent_setcb(bev, __task_readcb, NULL, __task_eventcb, task);
                 bufferevent_enable(bev, EV_READ);
@@ -463,29 +557,62 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
                 sin.sin_port = htons(g_base_worker_port + free_idx);
 
                 if (bufferevent_socket_connect(bev, (struct sockaddr*)&sin, sizeof(sin))) {
-                    __dispatch_worker_result();
-                    //__dispatch_error_1(NULL, 10011, "internal error, task bind failed", NULL, NULL);
-                    // unbind
-                    // !!!
-                    continue;
+                    loge("bind task %s to worker#%u failed, bufferevent_socket_connect failed\n", task->token, free_idx);
+                    bufferevent_free(bev);
+                    task->bind_worker_idx = 0;
+                    task->binded = 0;
+                    goto _NEXT;
                 }
 
-                // 向管道写
+                char *cmd = cJSON_PrintUnformatted(task->j_req);
+                if (!cmd) {
+                    loge("bind task %s to worker#%u failed, print cmd failed\n",task->token, free_idx);
+                    bufferevent_free(bev);
+                    task->bind_worker_idx = 0;
+                    task->binded = 0;
+                    goto _NEXT;
+                }
 
-                char *req_text = cJSON_PrintUnformatted(task->j_req);
-                u_int32_t req_len = strlen(req_text);
-                bufferevent_write(bev, &req_len, sizeof(req_len) );
-                bufferevent_write(bev, req_text, req_len);
-                free(req_text);
+                u_int32_t req_len = strlen(cmd);
+                if (bufferevent_write(bev, &req_len, sizeof(req_len))) {
+                    loge("bind task %s to worker#%u failed, write cmd_len failed\n", task->token, free_idx);
+                    bufferevent_free(bev);
+                    free(cmd);
+                    task->bind_worker_idx = 0;
+                    task->binded = 0;
+                    goto _NEXT;
+                }
+                if (bufferevent_write(bev, cmd, req_len)) {
+                    loge("bind task %s to worker#%u failed, write cmd failed\n", task->token, free_idx);
+                    bufferevent_free(bev);
+                    free(cmd);
+                    task->bind_worker_idx = 0;
+                    task->binded = 0;
+                    goto _NEXT;
+                }
+                free(cmd); cmd = NULL;
 
                 u_int32_t data_len =  task->data ? task->size : 0;
-                bufferevent_write(bev, &data_len, sizeof(data_len));
+                if (bufferevent_write(bev, &data_len, sizeof(data_len))) {
+                    loge("bind task %s to worker#%u failed, write data_len failed\n", task->token, free_idx);
+                    bufferevent_free(bev);
+                    task->bind_worker_idx = 0;
+                    task->binded = 0;
+                    goto _NEXT;
+                }
+
                 if (data_len > 0) {
-                    bufferevent_write(bev, task->data, data_len);
+                    if (bufferevent_write(bev, task->data, data_len)) {
+                        loge("bind task %s to worker#%u failed, write data failed\n", task->token, free_idx);
+                        bufferevent_free(bev);
+                        task->bind_worker_idx = 0;
+                        task->binded = 0;
+                        goto _NEXT;
+                    }
                 }
             }
         }
-
+_NEXT:
         task = task_get_next(task); 
     }
 
@@ -496,21 +623,21 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
 }
 
 u_int16_t get_free_worker() {
-    printf("get_free_worker\n");
+    //printf("get_free_worker\n");
     int i;
     if (!g_workers) return 0;
     for (i = 1; i <= g_worker_num; i++) {
-        printf("i = %d\n", i);
+        //printf("i = %d\n", i);
         worker_t *worker = &(g_workers[i]);
-        printf("worker->alive = %d, worker->busy = %d\n", worker->alive, worker->busy);
+        //printf("worker->alive = %d, worker->busy = %d\n", worker->alive, worker->busy);
         if (worker->alive && !worker->busy) {
             int binding = 0;
-            printf("binding = %d\n", binding);
+            //printf("binding = %d\n", binding);
             task_t *cur = task_get_head();
             while (cur) {
-                printf("cur->token = %s\n", cur->token);
+                //printf("cur->token = %s\n", cur->token);
                 if (cur->bind_worker_idx == i) {
-                    printf("binding = 1 at %d\n", i);
+                    //printf("binding = 1 at %d\n", i);
                     binding = 1;
                     break;
                 }

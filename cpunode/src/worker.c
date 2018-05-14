@@ -62,49 +62,6 @@ static void __reset_fsm_data() {
     _fsm.result_len = 0;
 }
 
-
-/*
-
-static void __result_callback_cb(int result, char *data, unsigned int size) {
-    printf("result = %d\n", result);
-    printf("data = %s\n", data);
-    printf("size = %d\n", size);
-
-    struct evbuffer *output = bufferevent_get_output(_fsm.bev);
-    //evbuffer_add_printf(output, "what what what");;
-
-
-    // 向管道写
-    evbuffer_add(output, "\n", 1);
-    evbuffer_add(output, WORKER_FRAME_MAGIC_HEAD, sizeof(WORKER_FRAME_MAGIC_HEAD));
-    evbuffer_add(output, "\n", 1);
-    evbuffer_add(output, "10\n", 3);
-    evbuffer_add(output, "hellohello", 10);
-    evbuffer_add(output, "0\n", 2);
-
-    _fsm.state = e_worker_state_idle;
-}
-
-static void __result_callback(char *result) {
-    printf("result_cb\n");
-
-    // write
-
-    if (http_post (
-                g_worker_base, 
-                "http://10.0.200.20:5001/callback",
-                "this is result\n", 
-                strlen("this is result"), 
-                __result_callback_cb,
-                NULL
-            )
-        ) {
-        
-        printf("post failed\n");
-    }
-}
-*/
-
 typedef struct {
     float time_rate;
     float speech_time;

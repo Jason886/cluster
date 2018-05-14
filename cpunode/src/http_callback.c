@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 typedef struct http_post {
-    void (*cb)(int result, char *data, unsigned int size);
+    void (*cb)(int result, char *data, unsigned int size, void *user_data);
     void *user_data;
 } http_post_t;
 
@@ -42,7 +42,7 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
         if (rescode != 200) {
             loge("http rescode: %d, %s\n", rescode, uri);
             if (post->cb) {
-                post->cb(-1, 0, 0); 
+                post->cb(-1, 0, 0, post->user_data); 
             }
             break;
         }
@@ -55,7 +55,7 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
         if (!data) {
             loge("malloc failed, %s\n", uri);
             if (post->cb) {
-                post->cb(-1, 0, 0);
+                post->cb(-1, 0, 0, post->user_data);
             }
             break;
         }
@@ -64,7 +64,7 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
         if (read_n < 0) {
             loge("can't drain the buffer, %s\n", uri);
             if (post->cb) {
-                post->cb(-1, 0, 0);
+                post->cb(-1, 0, 0, post->user_data);
             }
             free(data);
             break;
@@ -72,7 +72,7 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
 
         data[read_n] = 0;
         if (post->cb) {
-            post->cb(0, data, read_n);
+            post->cb(0, data, read_n, post->user_data);
 
         }
 
@@ -88,7 +88,7 @@ int http_post (
         const char *url,
         const char *data,
         size_t size,
-        void (*cb)(int result, char *data, unsigned int size),
+        void (*cb)(int result, char *data, unsigned int size, void *user_data),
         void *user_data
     ) {
 

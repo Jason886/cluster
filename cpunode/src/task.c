@@ -87,6 +87,7 @@ task_t * task_new( const char *req_path, struct cJSON *j_req, char *data, size_t
 
     task->binded = 0;
     task->bind_worker_idx = 0;
+    task->bev = NULL;
 
     task->result = NULL;
     task->result_len = 0;
