@@ -54,8 +54,8 @@ var server = http.createServer(function(req, res) {
 
   if (reqPath == "/callback") {
     console.log("reqPath: %s", reqPath);
-    var buffers=[];
-    req.on('data',function(trunk) {
+      var buffers=[];
+      req.on('data',function(trunk) {
       buffers.push(trunk);
     }).on('end',function() {
       var buffer = Buffer.concat(buffers);
@@ -68,7 +68,7 @@ var server = http.createServer(function(req, res) {
 
   var filePath = cfg.site;
   if (reqPath != "/") filePath += reqPath;
-  console.log("reqPath: %s -> filePath:%s", reqPath, filePath)
+  //console.log("reqPath: %s -> filePath:%s", reqPath, filePath)
 
   fs.exists(filePath, function(exists) {
     if (exists) {
@@ -81,7 +81,7 @@ var server = http.createServer(function(req, res) {
           if (stats.isFile()) {
             var fileExt = getExt(getFileName(filePath));
             var contentType = getMine(fileExt)
-            console.log("fileExt: %s, contentType: %s", fileExt != null ? fileExt : "null", contentType)
+            //console.log("fileExt: %s, contentType: %s", fileExt != null ? fileExt : "null", contentType)
             var file = fs.createReadStream(filePath);
             res.writeHead(200, {'Content-Type': contentType});
             file.pipe(res)
