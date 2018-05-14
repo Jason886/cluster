@@ -27,7 +27,7 @@ extern unsigned int g_worker_id;
 extern worker_t *g_workers;
 
 struct event *g_eval_timer = NULL;
-struct timeval g_eval_timeval = { 0, 50000}; 
+struct timeval g_eval_timeval = { 0, 100000}; 
 
 typedef struct eval_req_params {
     int _has_token:1;
@@ -626,14 +626,14 @@ _RESPONSE:
 }
 
 void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
-    logd("master timer cb\n");
+    //logd("master timer cb\n");
 
     task_t * task = task_get_head();
     while (task) {
         // !!! get_free_worker设置为不可中断
         u_int16_t free_idx = get_free_worker();
 
-        logd("get_free_worker: %u\n", free_idx);
+        //logd("get_free_worker: %u\n", free_idx);
         if (free_idx == 0) {
             break;
         }

@@ -242,8 +242,6 @@ static void __do_calc() {
         is_fea = 1;
     }
 
-    /*
-
     if (is_fea) {
         if (__check_fea_data(_fsm.data, _fsm.data_len)) {
             loge("worker#%u invalid fea data. %s\n", g_worker_id, _fsm.cmd);
@@ -295,19 +293,20 @@ static void __do_calc() {
     }
     
     char *res = engine->res;
-    */
+    /*
     char *res = "{\"time_rate\":0.0562,\"speech_time\":0.0137,\"speech_time_per\":0.3309,\"eng_time\":0.0060,\"eng_time_per\":0.1462,\"wrd_nums\":21,\"wrd_nums_div_time\":507.7915}";
+    */
 
     if (!res || strlen(res) == 0) {
         loge("worker#%u wtk_vipkid_engine result empty. %s\n", g_worker_id, _fsm.cmd);
         _fsm.state = e_worker_state_write_result;
         __write_error(10011, "internal error, engine result empty");
-        //wtk_vipkid_engine_delete(engine);
+        wtk_vipkid_engine_delete(engine);
         return;
     }
 
     struct cJSON *j_res = cJSON_Parse(res);
-    //wtk_vipkid_engine_delete(engine); engine = NULL;
+    wtk_vipkid_engine_delete(engine); engine = NULL;
     if (!j_res || j_res->type != cJSON_Object) {
         loge("worker#%u wtk_vipkid_engine result invalid json. %s ||| request: %s\n", g_worker_id, res, _fsm.cmd);
         _fsm.state = e_worker_state_write_result;
