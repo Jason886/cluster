@@ -51,11 +51,9 @@ var getMine = function(ext) {
 
 var server = http.createServer(function(req, res) {
   var reqPath = url.parse(req.url).path;
-  var filePath = cfg.site;
-  if (reqPath != "/") filePath += reqPath;
-  console.log("reqPath: %s -> filePath:%s", reqPath, filePath)
 
   if (reqPath == "/callback") {
+    console.log("reqPath: %s", reqPath);
     var buffers=[];
     req.on('data',function(trunk) {
       buffers.push(trunk);
@@ -67,6 +65,10 @@ var server = http.createServer(function(req, res) {
     res.end('{"token":"xxxxxx", "result":0}');
     return;
   }
+
+  var filePath = cfg.site;
+  if (reqPath != "/") filePath += reqPath;
+  console.log("reqPath: %s -> filePath:%s", reqPath, filePath)
 
   fs.exists(filePath, function(exists) {
     if (exists) {
