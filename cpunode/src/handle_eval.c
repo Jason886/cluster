@@ -276,7 +276,7 @@ static void __result_callback_cb(int result, char *data, unsigned int size, void
 
     task_t *task = user_data;
 
-    printf("__result_callback_cb result = %d\n", result);
+    logd("callback response: result:%d data: %p size: %u\n", result, data, size);
 
     if (result != 0) { 
         task->recv_state = e_task_state_failed;
@@ -284,14 +284,14 @@ static void __result_callback_cb(int result, char *data, unsigned int size, void
     }
 
     if (!data || size == 0) {
-        printf("__result_callback_cb data empty\n");
+        loge("callback response data empty\n");
         task->recv_state = e_task_state_failed;
         return;
     }
 
     char *data_dup = malloc(size +1);
     if (!data_dup) {
-        printf("data dup failed\n");
+        loge("dup data failed\n");
         task->recv_state = e_task_state_failed;
         return;
     }
@@ -300,7 +300,7 @@ static void __result_callback_cb(int result, char *data, unsigned int size, void
 
     struct cJSON *j_data = cJSON_Parse(data_dup);
     if (!j_data) {
-        printf("__result_callback_cb data not json: %s\n", data_dup);
+        loge("parse json failed: %s\n", data_dup);
         task->recv_state = e_task_state_failed;
         free(data_dup);
         return;
@@ -312,12 +312,12 @@ static void __result_callback_cb(int result, char *data, unsigned int size, void
                (j_result->type == cJSON_String && strcmp(j_result->valuestring, "0") == 0) 
                 )
             ) {
-        printf("__result_callback_cb data ok: %s\n", data_dup);
+        loge("post callback success\n");
         task_remove(task);
         task_free(task);
     }
     else {
-        printf("__result_callback_cb data error: %s\n", data_dup);
+        loge("post callback: result fail\n");
         task->recv_state = e_task_state_failed;
     }
     cJSON_Delete(j_data);
@@ -548,7 +548,7 @@ static void __task_readcb(struct bufferevent *bev, void *user_data) {
     while (evbuffer_get_length(input) > 0) {
         switch (task->recv_state) {
             case e_task_state_wait:
-                printf("e_task_state_wait\n");
+                logd("e_task_state_wait\n");
                 return;
 
             case e_task_state_read_len:
@@ -613,7 +613,7 @@ static void __task_readcb(struct bufferevent *bev, void *user_data) {
     }
 
 _RESPONSE:
-    printf("response: %s\n", task->result);
+    logi("response: %s\n", task->result);
 
     // unbind
     task->binded = 0;

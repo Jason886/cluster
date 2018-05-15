@@ -40,13 +40,14 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
     http_post_t *post = arg;
     const char *uri = evhttp_request_get_uri(request);
 
-    logd("uri %s\n", uri);
-
     do {
+        struct evbuffer *input = evhttp_request_get_input_buffer(request);
         int rescode = evhttp_request_get_response_code(request);
+
+        logi("callback response: rescode=%d uri=%s, content===> %u\n %.*s\n", rescode, uri, EVBUFFER_LENGTH(input), EVBUFFER_LENGTH(input), EVBUFFER_DATA(input));
+
         if (rescode != 200) {
-            struct evbuffer *input = evhttp_request_get_input_buffer(request);
-            loge("http rescode: %d, %s\n %.*s\n", rescode, uri, EVBUFFER_LENGTH(input), EVBUFFER_DATA(input));
+            loge("callback rescode: %d\n", rescode);
             if (post->cb) {
                 post->cb(-1, 0, 0, post->user_data); 
             }
@@ -55,7 +56,6 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
 
         // rescode == 200
 
-        struct evbuffer *input = evhttp_request_get_input_buffer(request);
         size_t length = evbuffer_get_length(input);
         char *data = malloc(length+1);
         if (!data) {
