@@ -96,7 +96,7 @@ int main(int argc, char *argv[]) {
     char *task_file = "bin/task_list_01.json"; 
     int oc;
 
-    while ((oc = getopt(argc, argv, "c:p:t:b:")) != -1) {  
+    while ((oc = getopt(argc, argv, "c:p:t:")) != -1) {  
         switch (oc) {  
             case 'c':
                 conf_path = optarg;  
@@ -106,8 +106,6 @@ int main(int argc, char *argv[]) {
                 break;
             case 't':
                 task_file = optarg;
-                break;
-            case 'b':
                 break;
             default:
                 printf("unknown options\n");  
