@@ -21,7 +21,6 @@
 #define _PARAM_SCANF_FMT "%*[^=]=\"%127[^\"]\"; filename=\"%511[^\"]\""
 
 extern struct event_base *g_base;
-//extern int g_base_worker_port;
 extern unsigned int g_worker_num;
 extern unsigned int g_worker_id;
 extern worker_t *g_workers;

@@ -17,7 +17,6 @@
 
 struct config *g_conf = NULL;
 struct event_base *g_base = NULL;
-//int g_base_worker_port = 7000;
 wtk_vipkid_engine_cfg_t *g_vipkid_engine_cfg = NULL;
 
 static int __init_log(struct config *conf) {
@@ -109,7 +108,6 @@ int main(int argc, char *argv[]) {
                 task_file = optarg;
                 break;
             case 'b':
-                //g_base_worker_port = atoi(optarg);
                 break;
             default:
                 printf("unknown options\n");  
