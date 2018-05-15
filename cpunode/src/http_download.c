@@ -148,11 +148,11 @@ int http_download (
     if (port <= 0) port = 80;
 
     char header_host[1024];
-    snprintf(header_host, sizeof(header_host), "%s:%u", host, port);
+    snprintf(header_host, sizeof(header_host), "%s:%d", host, port);
     char header_path[512];
     snprintf(header_path, sizeof(header_path), "%s", path);
 
-    logd("download from host = %s, port = %d\n", host, port);
+    logd("header_host= %s:%d, header_path = %s\n", host, port, header_path);
 
     connection = evhttp_connection_base_new(base, NULL, host, port);
     if (!connection) {
