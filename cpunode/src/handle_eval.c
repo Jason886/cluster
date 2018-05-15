@@ -489,14 +489,13 @@ static void __task_eventcb(struct bufferevent *bev, short events, void *user_dat
     }
 
     if (events & BEV_EVENT_EOF) {
-        printf("eof\n");
         // unbind
         task->bind_worker_idx = 0;
         task->binded = 0;
         bufferevent_free(bev);
 
         if (task->recv_state != e_task_state_response) {
-            loge("task got BEV_EVENT_EOF\n");
+            loge("task got BEV_EVENT_EOF, token:%s\n", task->token);
             __make_task_error_result(task, 10011, "internal error, task got bev_event_eof");
             task->recv_state = e_task_state_response;
             __response_task_result(task);
@@ -504,18 +503,20 @@ static void __task_eventcb(struct bufferevent *bev, short events, void *user_dat
         return;
 
     } else if (events & BEV_EVENT_ERROR) {
-        printf("task event error\n");
+        loge("task got BEV_EVENT_ERROR, token:%s\n", task->token);
         // unbind
         task->bind_worker_idx = 0;
         task->binded = 0;
         bufferevent_free(bev);
         if (task->recv_state != e_task_state_response) {
-            loge("task got BEV_EVENT_ERROR\n");
+            loge("task got BEV_EVENT_ERROR, token:%s\n", task->token);
             __make_task_error_result(task, 10011, "internal error, task got bev_event_error");
             task->recv_state = e_task_state_response;
             __response_task_result(task);
         }
         return;
+    } else if (events & BEV_EVENT_CONNECTED) {
+        logd("task event connected\n");
     }
 }
 

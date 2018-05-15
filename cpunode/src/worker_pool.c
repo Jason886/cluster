@@ -15,6 +15,8 @@ unsigned int g_worker_num = 0;
 unsigned int g_worker_max_use = 400;
 worker_t *g_workers = NULL;
 
+static struct event *_ev_sigchild = NULL;
+
 static int __fork_worker(unsigned int id) {
     g_workers[id].listen_at = 0;
     g_workers[id].alive = 0;
@@ -81,7 +83,6 @@ static int __fork_worker(unsigned int id) {
     else {
         signal(SIGINT, SIG_DFL);
         signal(SIGTERM, SIG_DFL);
-        signal(SIGCHLD, SIG_IGN);
 
         // child
         if (event_reinit(g_base)) {
@@ -89,6 +90,7 @@ static int __fork_worker(unsigned int id) {
             sleep(3);
             exit(1);
         }
+        event_free(_ev_sigchild); _ev_sigchild = NULL;
         cpunode_httpd_free();
         event_base_free(g_base);
         g_base = NULL;
@@ -108,7 +110,8 @@ static int __fork_worker(unsigned int id) {
     }
 }
 
-static void __on_sigchild(int sig) {
+
+static void __on_signal_child(evutil_socket_t sig, short events, void *user_data) {
     pid_t pid;
     while ( (pid = waitpid(-1, NULL, WNOHANG)) > 0) {
         if (!g_workers) {
@@ -158,7 +161,11 @@ int init_workers(struct config *conf) {
     g_worker_max_use = max_use;
     g_worker_id = 0; // 主进程worker_id = 0
 
-    signal(SIGCHLD, __on_sigchild);
+    _ev_sigchild = evsignal_new(g_base, SIGCHLD, __on_signal_child, NULL);
+    if (!_ev_sigchild || event_add(_ev_sigchild, NULL) < 0) {
+        loge("evsignal_new failed\n");
+        goto _E1;
+    }
 
     int id;
     for (id = 1; id <= worker_num; ++id) {
@@ -170,8 +177,13 @@ int init_workers(struct config *conf) {
 
 _E1:
 
-    // !!! 忽略sigchld信号
+    if (_ev_sigchild) {
+        event_free(_ev_sigchild);
+        _ev_sigchild = NULL;
+    }
+
     // !!! 退出所有子进程
+
     if (g_workers) {
         free(g_workers);
         g_workers = NULL;
