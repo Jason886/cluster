@@ -5,6 +5,13 @@
 #include <event2/http.h>
 #include <stdlib.h>
 
+#include <event.h>
+#include <event2/event.h>
+#include <event2/buffer.h>
+#include <event2/bufferevent.h>
+#include <event2/http.h>
+#include <event2/http_struct.h>
+
 typedef struct http_download {
     void (*cb)(int result, char *data, unsigned int size);
     void *user_data;
@@ -15,11 +22,11 @@ typedef struct http_download {
 
 
 static void __on_connection_close_cb(struct evhttp_connection *connection, void *arg) {
-    logd("connection close\n");
+    logd("__on_connection_close_cb\n");
 
-    if (arg) {
-        free(arg);
-    }
+    //if (arg) {
+    //    free(arg);
+    //}
 }
 
 
@@ -40,7 +47,8 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
     do {
         int rescode = evhttp_request_get_response_code(request);
         if (rescode != 200) {
-            loge("http rescode: %d, %s\n", rescode, uri);
+            struct evbuffer *input = evhttp_request_get_input_buffer(request);
+            loge("http rescode: %d, %s\n %.*s\n", rescode, uri, EVBUFFER_LENGTH(input), EVBUFFER_DATA(input));
             if (download->cb) {
                 download->cb(-1, 0, 0);
             }
@@ -80,6 +88,10 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
         }
         break;
     } while(1);
+
+    if (arg) {
+        free(arg);
+    }
 }
 
 
@@ -128,6 +140,11 @@ int http_download (
     int port = evhttp_uri_get_port(evuri);
     if (port <= 0) port = 80;
 
+    char header_host[1024];
+    snprintf(header_host, sizeof(header_host), "%s:%u", host, port);
+
+    logd("download from host = %s, port = %d\n", host, port);
+
     connection = evhttp_connection_base_new(base, NULL, host, port);
     if (!connection) {
         loge("evhttp_connection_base_new failed, %s\n", url);
@@ -149,6 +166,9 @@ int http_download (
         evhttp_connection_free(connection);
         return -1;
     }
+
+    struct evkeyvalq *headers = evhttp_request_get_output_headers(request);
+    evhttp_add_header(headers, "Host", header_host);
     
     if (evhttp_make_request(
                 connection,

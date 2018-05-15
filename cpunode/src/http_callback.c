@@ -1,8 +1,13 @@
 #include "http_callback.h"
 #include "liblog.h"
 
+#include <event.h>
 #include <event2/event.h>
+#include <event2/buffer.h>
+#include <event2/bufferevent.h>
 #include <event2/http.h>
+#include <event2/http_struct.h>
+
 #include <stdlib.h>
 
 typedef struct http_post {
@@ -17,9 +22,9 @@ typedef struct http_post {
 static void __on_connection_close_cb(struct evhttp_connection *connection, void *arg) {
     logd("connection close\n");
 
-    if (arg) {
-        free(arg);
-    }
+    //if (arg) {
+    //    free(arg);
+    //}
 }
 
 
@@ -40,7 +45,8 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
     do {
         int rescode = evhttp_request_get_response_code(request);
         if (rescode != 200) {
-            loge("http rescode: %d, %s\n", rescode, uri);
+            struct evbuffer *input = evhttp_request_get_input_buffer(request);
+            loge("http rescode: %d, %s\n %.*s\n", rescode, uri, EVBUFFER_LENGTH(input), EVBUFFER_DATA(input));
             if (post->cb) {
                 post->cb(-1, 0, 0, post->user_data); 
             }
@@ -80,6 +86,10 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
         free(data);
         break;
     } while(1);
+
+    if (arg) {
+        free(arg);
+    }
 }
 
 
@@ -128,6 +138,9 @@ int http_post (
     int port = evhttp_uri_get_port(evuri);
     if (port <= 0) port = 80;
 
+    char header_host[1024];
+    snprintf(header_host, sizeof(header_host), "%s:%u", host, port);
+
     connection = evhttp_connection_base_new(base, NULL, host, port);
     if (!connection) {
         loge("evhttp_connection_base_new failed, %s\n", url);
@@ -150,7 +163,10 @@ int http_post (
         return -1;
     }
 
-    evhttp_add_header(evhttp_request_get_output_headers(request), "Content-Type", "text/json; charset=UTF-8");  
+    struct evkeyvalq *headers = evhttp_request_get_output_headers(request);
+    evhttp_add_header(headers, "Host", header_host);
+    evhttp_add_header(headers, "Content-Type", "text/json; charset=UTF-8");  
+
     struct evbuffer *output = evhttp_request_get_output_buffer(request); 
     evbuffer_add(output, data, size);
 

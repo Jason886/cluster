@@ -333,6 +333,7 @@ static void __do_calc() {
 }
 
 static void __download_cb(int result, char *data, unsigned int size) {
+    logd("__download_cb result = %d, data = %p, size = %u\n", result, data, size);
     if (result != 0) {
         loge("worker#%u download failed from fileurl. %s\n", g_worker_id, _fsm.cmd);
         _fsm.state = e_worker_state_write_result;

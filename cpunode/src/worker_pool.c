@@ -17,22 +17,21 @@ unsigned int g_worker_max_use = 400;
 worker_t *g_workers = NULL;
 
 static int __fork_worker(unsigned int id) {
-    unsigned short listen_at = g_base_worker_port + id;
-    g_workers[id].listen_at = listen_at; 
+    g_workers[id].listen_at = 0;
     g_workers[id].alive = 0;
     g_workers[id].busy = 0;
 
     struct event_base * worker_base = event_base_new();
     if (!worker_base) {
-        loge("event_base_new for worker#%u failed\n", id);
+        loge("event_base_new failed, id = %u\n", id);
         return -1;
     }
 
     struct sockaddr_in sin;
     memset(&sin, 0, sizeof(sin));
     sin.sin_family = AF_INET;
-    sin.sin_addr.s_addr = htonl(0);
-    sin.sin_port = htons(listen_at);
+    sin.sin_addr.s_addr = htonl(INADDR_ANY);
+    sin.sin_port = htons(0);
 
     struct evconnlistener * listener = evconnlistener_new_bind(
             worker_base,
@@ -44,10 +43,21 @@ static int __fork_worker(unsigned int id) {
             sizeof(sin)
             );
     if (!listener) {
-        loge("evconnlistener_new_bind for worker#%u failed, listen_at: %u\n", id, listen_at);
+        loge("evconnlistener_new_bind failed, id = %u\n", id);
         event_base_free(worker_base);
         return -1;
     }
+    
+    struct sockaddr_in sin2;
+    int len2 = sizeof(sin2);
+    memset(&sin2, 0, len2);
+    if (getsockname(evconnlistener_get_fd(listener), (struct sockaddr*)&sin2, &len2)) {
+        loge("getsockname failed, id = %u\n", id);
+        evconnlistener_free(listener);
+        event_base_free(worker_base);
+        return -1;
+    }
+    g_workers[id].listen_at = ntohs(sin2.sin_port); 
     logi("worker#%u listen at %u\n", id, g_workers[id].listen_at);
 
     evconnlistener_set_error_cb(listener, worker_listener_error_cb);

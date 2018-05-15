@@ -21,7 +21,7 @@
 #define _PARAM_SCANF_FMT "%*[^=]=\"%127[^\"]\"; filename=\"%511[^\"]\""
 
 extern struct event_base *g_base;
-extern int g_base_worker_port;
+//extern int g_base_worker_port;
 extern unsigned int g_worker_num;
 extern unsigned int g_worker_id;
 extern worker_t *g_workers;
@@ -661,6 +661,7 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
 
         //task->bev = bev;
 
+        // !!! 在listened事件中写代码
         bufferevent_setcb(bev, __task_readcb, NULL, __task_eventcb, task);
         bufferevent_enable(bev, EV_READ);
         bufferevent_enable(bev, EV_WRITE);
@@ -669,7 +670,7 @@ void eval_timer_cb(evutil_socket_t fd, short what, void *arg) {
         memset(&sin, 0, sizeof(sin));
         sin.sin_family = AF_INET;
         sin.sin_addr.s_addr = inet_addr("127.0.0.1");
-        sin.sin_port = htons(g_base_worker_port + free_idx);
+        sin.sin_port = htons(g_workers[free_idx].listen_at);
 
         if (bufferevent_socket_connect(bev, (struct sockaddr*)&sin, sizeof(sin))) {
             loge("bind task %s to worker#%u failed, bufferevent_socket_connect failed\n", task->token, free_idx);

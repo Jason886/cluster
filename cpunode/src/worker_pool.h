@@ -16,7 +16,7 @@ extern "C" {
 
 typedef struct worker {
     pid_t pid;
-    unsigned short listen_at;
+    u_int16_t listen_at;
     int8_t alive;
     int8_t busy;
     void * task;
