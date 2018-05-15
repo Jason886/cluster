@@ -131,8 +131,15 @@ int http_download (
     }
 
     const char *host = evhttp_uri_get_host(evuri);
+    const char *path = evhttp_uri_get_path(evuri);
     if (!host || strlen(host) == 0) {
         loge("no host in url: %s\n", url);
+        free(download);
+        evhttp_uri_free(evuri);
+        return -1;
+    }
+    if (!path || strlen(path) == 0) {
+        loge("no path in url: %s\n", url);
         free(download);
         evhttp_uri_free(evuri);
         return -1;
@@ -142,6 +149,8 @@ int http_download (
 
     char header_host[1024];
     snprintf(header_host, sizeof(header_host), "%s:%u", host, port);
+    char header_path[512];
+    snprintf(header_path, sizeof(header_path), "%s", path);
 
     logd("download from host = %s, port = %d\n", host, port);
 
@@ -174,7 +183,7 @@ int http_download (
                 connection,
                 request,
                 EVHTTP_REQ_GET,
-                url)
+                header_path)
         ) {
        loge("evhttp_make_request failed, %s\n", url);
        free(download); 

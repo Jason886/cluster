@@ -88,6 +88,20 @@ static void __unload_vipkid_engine_cfg() {
     }
 }
 
+static void __on_sigint(int sig) {
+    signal(SIGCHLD, SIG_IGN);
+    // 杀死所有子进程
+    pid_t pid;
+    int id = 0;
+    for (id = 1; id <= g_worker_num; ++id) {
+        pid = g_workers[id].pid;
+        if (pid > 0) {
+            kill(pid, SIGTERM);
+        }
+    }
+    exit(1);
+}
+
 
 int main(int argc, char *argv[]) {
     int ret = -1;
@@ -113,6 +127,9 @@ int main(int argc, char *argv[]) {
         }  
     }
 
+    signal(SIGINT, __on_sigint);
+    signal(SIGTERM, __on_sigint);
+
     if (!(g_conf = conf_load(conf_path))) {
         loge("Couldn't get config from path: %s\n", conf_path);
         goto _E;
@@ -124,7 +141,7 @@ int main(int argc, char *argv[]) {
 
     g_base = event_base_new(); 
     if (!g_base) {
-        loge("Couldn't create an event base.");
+        loge("Couldn't create an event base.\n");
         goto _E;
     }
 

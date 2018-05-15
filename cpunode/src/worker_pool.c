@@ -79,6 +79,10 @@ static int __fork_worker(unsigned int id) {
         return 0;
     }
     else {
+        signal(SIGINT, SIG_DFL);
+        signal(SIGTERM, SIG_DFL);
+        signal(SIGCHLD, SIG_IGN);
+
         // child
         if (event_reinit(g_base)) {
             loge("worker#%u event_reinit master_base failed\n", id);

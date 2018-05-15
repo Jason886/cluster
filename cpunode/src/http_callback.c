@@ -129,8 +129,15 @@ int http_post (
     }
 
     const char *host = evhttp_uri_get_host(evuri);
+    const char *path = evhttp_uri_get_path(evuri);
     if (!host || strlen(host) == 0) {
         loge("no host in url: %s\n", url);
+        free(post);
+        evhttp_uri_free(evuri);
+        return -1;
+    }
+    if (!path || strlen(path) == 0) {
+        loge("no path in url: %s\n", url);
         free(post);
         evhttp_uri_free(evuri);
         return -1;
@@ -138,8 +145,10 @@ int http_post (
     int port = evhttp_uri_get_port(evuri);
     if (port <= 0) port = 80;
 
-    char header_host[1024];
+    char header_host[256];
     snprintf(header_host, sizeof(header_host), "%s:%u", host, port);
+    char header_path[512];
+    snprintf(header_path, sizeof(header_path), "%s", path);
 
     connection = evhttp_connection_base_new(base, NULL, host, port);
     if (!connection) {
@@ -174,7 +183,7 @@ int http_post (
                 connection,
                 request,
                 EVHTTP_REQ_POST,
-                url)
+                header_path)
         ) {
        loge("evhttp_make_request failed, %s\n", url);
        free(post); 
