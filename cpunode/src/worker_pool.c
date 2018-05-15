@@ -10,7 +10,6 @@
 #include <stdlib.h>
 
 extern struct event_base *g_base;
-extern int g_base_worker_port;
 
 unsigned int g_worker_num = 0;
 unsigned int g_worker_max_use = 400;
@@ -121,6 +120,7 @@ static void __on_sigchild(int sig) {
             // !!! g_workers[id].task失败处理
             g_workers[id].alive = 0;
             g_workers[id].busy = 0;
+            g_workers[id].listen_at = 0;
 
             if (__fork_worker(id)) {
                 break;
