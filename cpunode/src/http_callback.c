@@ -176,7 +176,7 @@ int http_post (
 
     struct evkeyvalq *headers = evhttp_request_get_output_headers(request);
     evhttp_add_header(headers, "Host", header_host);
-    evhttp_add_header(headers, "Content-Type", "text/json; charset=UTF-8");  
+    evhttp_add_header(headers, "Content-Type", "application/json; charset=UTF-8");  
 
     struct evbuffer *output = evhttp_request_get_output_buffer(request); 
     evbuffer_add(output, data, size);

@@ -466,10 +466,10 @@ void cpunode_handle_eval(struct evhttp_request *req, void *arg) {
     //logd("cpunode_handle_eval, g_worker_id = %u\n", g_worker_id);
     logi("Received request. uri: %s, method:%d, from: %s:%d\n", evhttp_request_get_uri(req), method, req->remote_host, req->remote_port);
 
-    evhttp_add_header(evhttp_request_get_output_headers(req), "Content-Type", "text/json; charset=UTF-8");  
+    evhttp_add_header(evhttp_request_get_output_headers(req), "Content-Type", "application/json; charset=UTF-8");  
     evhttp_add_header(evhttp_request_get_output_headers(req), "Connection", "keep-alive");
 
-    if (!((method == EVHTTP_REQ_GET) || (method == EVHTTP_REQ_POST))) {
+    if (!(method == EVHTTP_REQ_POST)) {
         loge("un-supported http method: %d\n", method);
         __dispatch_error_1(req, 10001, NULL, NULL, NULL);
         return;

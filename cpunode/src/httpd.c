@@ -1,5 +1,6 @@
 #include "httpd.h"
 #include "handle_eval.h"
+#include "handle_status.h"
 #include "liblog.h"
 
 static struct {
@@ -8,6 +9,7 @@ static struct {
 } __router[] = 
 {
     {"/eval", cpunode_handle_eval},
+    {"/status", cpunode_handle_status},
     {"/hello", NULL}
 };
 #define ROUTER_NUM (sizeof(__router)/sizeof(__router[0]))
