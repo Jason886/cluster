@@ -44,7 +44,7 @@ void cpunode_handle_status(struct evhttp_request *req, void *arg) {
     int i = 0; 
     char tmp[2048];
 
-    evbuffer_add_printf(evb, "{");
+    evbuffer_add_printf(evb, "status_handle({");
 
     // workers
     if (g_workers && g_worker_num > 0) {
@@ -105,7 +105,7 @@ void cpunode_handle_status(struct evhttp_request *req, void *arg) {
         evbuffer_add_printf(evb, "]");
     }
 
-    evbuffer_add_printf(evb, "}");
+    evbuffer_add_printf(evb, "});");
 
     evhttp_send_reply(req, 200, "OK", evb);
     evbuffer_free(evb);
