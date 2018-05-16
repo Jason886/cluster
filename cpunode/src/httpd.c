@@ -64,7 +64,7 @@ _E:
     if (http) {
         evhttp_free(http);
     }
-    memset(g_httpd, 0, sizeof(g_httpd));
+    memset(&g_httpd, 0, sizeof(g_httpd));
 
     if (g_eval_timer) {
         event_free(g_eval_timer);

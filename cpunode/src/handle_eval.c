@@ -80,6 +80,11 @@ static int __fill_req_params(struct evhttp_request *req, const char *boundary, e
 
                     break;
                 case 1:
+                    if (strstr(line, boundary)) {
+                        parse_state = 0;
+                        free(line);
+                        continue;
+                    }
                     memset(value, 0, sizeof(value));
                     snprintf(value, sizeof(value), "%s", line);
                     free(line);
