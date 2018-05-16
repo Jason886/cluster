@@ -3,36 +3,70 @@
 </head>
 <body>
 
-<p id="intro"> hello </p>
+<div id = "info"></div>
+
+<div id="script_container"></div>
 
 <script type="text/javascript">
 
-var num = 0;
+function status_handle(status) {
+	//var intro = document.getElementById("intro");
+	//intro.innerHTML = JSON.stringify(status);
 
-function getStatus() {
-	var xmlhttp;
-	if (window.XMLHttpRequest) {// code for IE7+, Firefox, Chrome, Opera, Safari
-		xmlhttp=new XMLHttpRequest();
-	}
-	else {// code for IE6, IE5
-		xmlhttp=new ActiveXObject("Microsoft.XMLHTTP");
-	}
+	var info = document.getElementById("info");
+	var info_html = "";
+	info_html += "workers<br>";
+	info_html += "<table border='1'>";
+	info_html += "<tr><th>pid</th><th>listen</th><th>alive</th><th>busy</th></tr>"
+	if (status.workers) {
+		console.log("workers not null");
+		for(var i=0; i<status.workers.length; ++i) {
+			info_html += "<tr><td>"+status.workers[i].pid+
+						"</td><td>"+status.workers[i].listen_at+
+						"</td><td>"+status.workers[i].alive +
+						"</td><td>"+status.workers[i].busy + "</td></tr>";
 
-	xmlhttp.onreadystatechange = function() {
-		if (xmlhttp.readyState==4 && xmlhttp.status==200) {
-			//document.getElementById("myDiv").innerHTML=xmlhttp.responseText;
-			var intro = document.getElementById("intro");
-			num +=1;
-			intro.innerHTML = "hahaha" + num;
-			setTimeout("getStatus();",5000);
 		}
 	}
-	xmlhttp.open("GET","/status",true);
-	xmlhttp.send();
+	info_html += "</table>";
+	
+	info_html += "<br>";
+	info_html += "tasks<br>";
+	info_html += "<table border='1'>"
+	info_html += "<tr><th>token</th><th>appkey</th><th>state</th><th>is_async</th><th>binded</th><th>bind_idx</th><th>fileurl</th><th>callback</th><th>datasize</th><th>uri</th></tr>"
+	if (status.tasks) {
+		for (var i=0; i< status.tasks.length; ++i) {
+			info_html += "<tr><td>"+status.tasks[i].token +
+							"</td><td>"+status.tasks[i].appkey +
+							"</td><td>"+status.tasks[i].state +
+							"</td><td>"+status.tasks[i].is_async +
+							"</td><td>"+status.tasks[i].binded +
+							"</td><td>"+status.tasks[i].bind_worker_idx +
+							"</td><td>"+status.tasks[i].fileurl +
+							"</td><td>"+status.tasks[i].callback +
+							"</td><td>"+status.tasks[i].datasize +
+							"</td><td>"+status.tasks[i].uri + "</td></tr>";
+		}
+	}
+
+	info_html += "</table>"
+
+	info.innerHTML = info_html;
+
+	var script_container = document.getElementById('script_container');
+	script_container.innerHTML = "";
+	setTimeout("getStatus();", 5000);
 }
 
-setTimeout("getStatus();",5000)
+function getStatus() {
+	var script = document.createElement('script');
+	script.setAttribute('type', "text/javascript");
+	script.setAttribute('src', 'http://10.0.200.20:9001/status');
+	document.getElementById('script_container').appendChild(script);
+}
 
+getStatus();
 </script>
+
 </body>
 </html>
