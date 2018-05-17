@@ -138,10 +138,10 @@ static int __make_result(struct cJSON *j_res, char **errmsg) {
 
             j_wrd_nums->valueint,
             j_wrd_nums_div_time->valuedouble,
-            j_eng_time->valuedouble,
-            j_eng_time_per->valuedouble,
             j_speech_time->valuedouble,
             j_speech_time_per->valuedouble,
+            j_eng_time->valuedouble,
+            j_eng_time_per->valuedouble,
             time_rate,
 
             _fsm.jcmd?_fsm.cmd:"null"
