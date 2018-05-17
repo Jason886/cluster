@@ -70,6 +70,7 @@ static int __make_result(struct cJSON *j_res, char **errmsg) {
     //    *errmsg = "internal error, engine result no time_rate";
     //    return -1;
     //}
+    struct cJSON *j_wav_time = cJSON_GetObjectItem(j_res, "wav_time");
     struct cJSON *j_speech_time = cJSON_GetObjectItem(j_res, "speech_time");
     if (!j_speech_time || j_speech_time->type != cJSON_Number) {
         *errmsg = "internal error, engine result no speech_time";
@@ -107,7 +108,7 @@ static int __make_result(struct cJSON *j_res, char **errmsg) {
                 "\"word\": {\"count\": %d, \"rate\": %0.4f},"
                 "\"voice\": {\"duration\": %0.4f, \"percent\": %0.4f},"
                 "\"english\": {\"duration\": %0.4f, \"percent\": %0.4f},"
-                "\"time_rate\": %s"
+                "\"time_rate\": %s, \"wav_time\": %s"
             "},"
             "\"request\":%s"
         "}";
@@ -130,6 +131,11 @@ static int __make_result(struct cJSON *j_res, char **errmsg) {
     if (j_time_rate && j_time_rate->type == cJSON_Number) {
         snprintf(time_rate, sizeof(time_rate), "%0.4f", j_time_rate->valuedouble);
     }
+    char wav_time[30];
+    strcpy(wav_time, "null");
+    if (j_wav_time && j_wav_time->type == cJSON_Number) {
+        snprintf(wav_time, sizeof(wav_time), "%0.4f", j_wav_time->valuedouble);
+    }
 
     snprintf(result, len, fmt,
             token?"\"":"",
@@ -142,7 +148,7 @@ static int __make_result(struct cJSON *j_res, char **errmsg) {
             j_speech_time_per->valuedouble,
             j_eng_time->valuedouble,
             j_eng_time_per->valuedouble,
-            time_rate,
+            time_rate, wav_time,
 
             _fsm.jcmd?_fsm.cmd:"null"
         );
@@ -304,6 +310,8 @@ static void __do_calc() {
         wtk_vipkid_engine_delete(engine);
         return;
     }
+
+    //printf("worker#%u kernel result: %s\n", g_worker_id, res);
 
     struct cJSON *j_res = cJSON_Parse(res);
     wtk_vipkid_engine_delete(engine); engine = NULL;

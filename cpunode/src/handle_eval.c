@@ -285,12 +285,16 @@ static void __result_callback_cb(int result, char *data, unsigned int size, void
 
     if (result != 0) { 
         task->recv_state = e_task_state_failed;
+        task_remove(task);
+        task_free(task);
         return;
     }
 
     if (!data || size == 0) {
         loge("callback response data empty\n");
         task->recv_state = e_task_state_failed;
+        task_remove(task);
+        task_free(task);
         return;
     }
 
@@ -298,6 +302,8 @@ static void __result_callback_cb(int result, char *data, unsigned int size, void
     if (!data_dup) {
         loge("dup data failed\n");
         task->recv_state = e_task_state_failed;
+        task_remove(task);
+        task_free(task);
         return;
     }
     memset(data_dup, 0, size+1);
@@ -308,6 +314,8 @@ static void __result_callback_cb(int result, char *data, unsigned int size, void
         loge("parse json failed: %s\n", data_dup);
         task->recv_state = e_task_state_failed;
         free(data_dup);
+        task_remove(task);
+        task_free(task);
         return;
     }
 
@@ -324,6 +332,8 @@ static void __result_callback_cb(int result, char *data, unsigned int size, void
     else {
         loge("post callback: result fail\n");
         task->recv_state = e_task_state_failed;
+        task_remove(task);
+        task_free(task);
     }
     cJSON_Delete(j_data);
     free(data_dup);
