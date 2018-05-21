@@ -5,15 +5,6 @@
 extern "C" {
 #endif
 
-#define ERR_INF_SIZE 256
-
-struct errinf {
-    short errno;
-    char info[ERR_INF_SIZE];
-};
-
-void err_set(short errno, struct errinf * ei, ...);
-
 const char *cpunode_errmsg(short errno);
 
 #ifdef __cplusplus
