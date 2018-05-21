@@ -40,11 +40,19 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
     logd("__on_request_cb\n");
 
     http_download_t *download = arg;
-    const char *uri = evhttp_request_get_uri(request);
-
-    logd("uri %s\n", uri);
 
     do {
+        if (!request) {
+            loge("__on_request_cb: request null\n");
+            if (download->cb) {
+                download->cb(-1, 0, 0); 
+            }
+            break;
+        }
+
+        const char *uri = evhttp_request_get_uri(request);
+        logd("uri %s\n", uri);
+
         int rescode = evhttp_request_get_response_code(request);
         if (rescode != 200) {
             struct evbuffer *input = evhttp_request_get_input_buffer(request);

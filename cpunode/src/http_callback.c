@@ -38,9 +38,17 @@ static void __on_request_cb(struct evhttp_request *request, void *arg) {
     logd("__on_request_cb\n");
 
     http_post_t *post = arg;
-    const char *uri = evhttp_request_get_uri(request);
 
     do {
+        if (!request) {
+            loge("__on_request_cb: request null\n");
+            if (post->cb) {
+                post->cb(-1, 0, 0, post->user_data); 
+            }
+            break;
+        }
+
+        const char *uri = evhttp_request_get_uri(request);
         struct evbuffer *input = evhttp_request_get_input_buffer(request);
         int rescode = evhttp_request_get_response_code(request);
 
