@@ -182,8 +182,6 @@ _E1:
         _ev_sigchild = NULL;
     }
 
-    // !!! 退出所有子进程
-
     if (g_workers) {
         free(g_workers);
         g_workers = NULL;
